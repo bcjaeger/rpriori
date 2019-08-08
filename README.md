@@ -13,7 +13,10 @@ status](https://ci.appveyor.com/api/projects/status/github/njtierney/rpriori?bra
 experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://www.tidyverse.org/lifecycle/#experimental)
 <!-- badges: end -->
 
-The goal of `rpriori` is to
+The goal of `rpriori` is to provide a framework that simplifies apriori
+hypothesis testing. In particular, `rpriori` focuses on building sets of
+models that examine one primary hypothesis under several sets of
+potential confounding variables.
 
 ## Installation
 
@@ -25,7 +28,7 @@ You can install the development version from
 remotes::install_github("bcjaeger/rpriori")
 ```
 
-# Example
+# Logistic regression
 
 Here are the packages we’ll use for this example:
 
@@ -35,8 +38,6 @@ library(rpriori)
 library(magrittr)
 library(glue)
 library(tidyverse)
-#> Warning: package 'tidyr' was built under R version 3.6.1
-#> Warning: package 'dplyr' was built under R version 3.6.1
 library(knitr)
 library(kableExtra)
 
@@ -96,14 +97,14 @@ m3 <- spec_sub(m1, name = 'Model 3', age = fare)
 What comes next? Our specifications are set, but they are separate. They
 also haven’t been embedded into the main question of interest,
 i.e. `survival ~ pclass`. We can pull these specifications together
-into an object that encapsulates our main hypothesis with `specs_embed`
+into an object that encapsulates our main hypothesis with `spec_embed`
 
 ``` r
 
 main_hypothesis <- survived ~ pclass
 
 analysis <- main_hypothesis %>% 
-  specs_embed(m0, m1, m2a, m2b, m3)
+  spec_embed(m0, m1, m2a, m2b, m3)
 
 analysis
 #> # A tibble: 5 x 4
@@ -134,11 +135,18 @@ making it pair well with the `mutate()` function in the `dplyr` package.
 ``` r
 
 
+# formulas = analysis$formula
+# data = drop_na(titanic)
+# light_output = TRUE
+# family = binomial(link = 'logit')
+# engine = 'glm'
+
 analysis %<>%
   mutate(
     fits = fit_apri(
       formulas = formula,
       data = drop_na(titanic),
+      light_output = TRUE,
       family = binomial(link = 'logit'),
       engine = 'glm'
     )
@@ -157,13 +165,13 @@ just specify `effect = pclass`.
 analysis %>% 
   hoist_effect(fits, effect = pclass)
 #> # A tibble: 5 x 8
-#>   name     outcome  exposure formula   fits   First Second Third
-#>   <chr>    <chr>    <chr>    <list>    <list> <dbl>  <dbl> <dbl>
-#> 1 Model 0  survived pclass   <formula> <glm>     NA -0.726 -1.80
-#> 2 Model 1  survived pclass   <formula> <glm>     NA -1.31  -2.58
-#> 3 Model 2a survived pclass   <formula> <glm>     NA -1.41  -2.65
-#> 4 Model 2b survived pclass   <formula> <glm>     NA -1.33  -2.58
-#> 5 Model 3  survived pclass   <formula> <glm>     NA -0.800 -1.83
+#>   name     outcome  exposure formula   fits       First Second Third
+#>   <chr>    <chr>    <chr>    <list>    <list>     <dbl>  <dbl> <dbl>
+#> 1 Model 0  survived pclass   <formula> <lght_mdl>    NA -0.726 -1.80
+#> 2 Model 1  survived pclass   <formula> <lght_mdl>    NA -1.31  -2.58
+#> 3 Model 2a survived pclass   <formula> <lght_mdl>    NA -1.41  -2.65
+#> 4 Model 2b survived pclass   <formula> <lght_mdl>    NA -1.33  -2.58
+#> 5 Model 3  survived pclass   <formula> <lght_mdl>    NA -0.800 -1.83
 ```
 
 Neat, but maybe not as easy to read as it could be. `hoist_effect` has a
@@ -176,13 +184,13 @@ log-scale, we can exponentiate them:
 analysis %>% 
   hoist_effect(fits, effect = pclass, transform = exp)
 #> # A tibble: 5 x 8
-#>   name     outcome  exposure formula   fits   First Second  Third
-#>   <chr>    <chr>    <chr>    <list>    <list> <dbl>  <dbl>  <dbl>
-#> 1 Model 0  survived pclass   <formula> <glm>     NA  0.484 0.165 
-#> 2 Model 1  survived pclass   <formula> <glm>     NA  0.270 0.0757
-#> 3 Model 2a survived pclass   <formula> <glm>     NA  0.243 0.0705
-#> 4 Model 2b survived pclass   <formula> <glm>     NA  0.265 0.0757
-#> 5 Model 3  survived pclass   <formula> <glm>     NA  0.449 0.160
+#>   name     outcome  exposure formula   fits       First Second  Third
+#>   <chr>    <chr>    <chr>    <list>    <list>     <dbl>  <dbl>  <dbl>
+#> 1 Model 0  survived pclass   <formula> <lght_mdl>    NA  0.484 0.165 
+#> 2 Model 1  survived pclass   <formula> <lght_mdl>    NA  0.270 0.0757
+#> 3 Model 2a survived pclass   <formula> <lght_mdl>    NA  0.243 0.0705
+#> 4 Model 2b survived pclass   <formula> <lght_mdl>    NA  0.265 0.0757
+#> 5 Model 3  survived pclass   <formula> <lght_mdl>    NA  0.449 0.160
 ```
 
 Okay\! Now we have odds-ratios instead of regression coefficients, and
@@ -197,13 +205,13 @@ natural follow-up answer is to use the `ci` input argument of
 analysis %>% 
   hoist_effect(fits, effect = pclass, ci = 0.95, transform = exp)
 #> # A tibble: 5 x 8
-#>   name    outcome  exposure formula   fits  First  Second       Third      
-#>   <chr>   <chr>    <chr>    <list>    <lis> <chr>  <chr>        <chr>      
-#> 1 Model 0 survived pclass   <formula> <glm> 1 (re~ 0.48 (0.44,~ 0.17 (0.15~
-#> 2 Model 1 survived pclass   <formula> <glm> 1 (re~ 0.27 (0.23,~ 0.08 (0.06~
-#> 3 Model ~ survived pclass   <formula> <glm> 1 (re~ 0.24 (0.21,~ 0.07 (0.06~
-#> 4 Model ~ survived pclass   <formula> <glm> 1 (re~ 0.27 (0.23,~ 0.08 (0.06~
-#> 5 Model 3 survived pclass   <formula> <glm> 1 (re~ 0.45 (0.38,~ 0.16 (0.14~
+#>   name    outcome  exposure formula  fits    First    Second     Third     
+#>   <chr>   <chr>    <chr>    <list>   <list>  <chr>    <chr>      <chr>     
+#> 1 Model 0 survived pclass   <formul~ <lght_~ 1 (refe~ 0.48 (0.4~ 0.17 (0.1~
+#> 2 Model 1 survived pclass   <formul~ <lght_~ 1 (refe~ 0.27 (0.2~ 0.08 (0.0~
+#> 3 Model ~ survived pclass   <formul~ <lght_~ 1 (refe~ 0.24 (0.2~ 0.07 (0.0~
+#> 4 Model ~ survived pclass   <formul~ <lght_~ 1 (refe~ 0.27 (0.2~ 0.08 (0.0~
+#> 5 Model 3 survived pclass   <formul~ <lght_~ 1 (refe~ 0.45 (0.3~ 0.16 (0.1~
 ```
 
 This type of output can be passed right into your favorite table

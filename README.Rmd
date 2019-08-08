@@ -25,7 +25,7 @@ knitr::opts_chunk$set(
 [![Lifecycle: experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://www.tidyverse.org/lifecycle/#experimental)
 <!-- badges: end -->
 
-The goal of `rpriori` is to 
+The goal of `rpriori` is to provide a framework that simplifies apriori hypothesis testing. In particular, `rpriori` focuses on building sets of models that examine one primary hypothesis under several sets of potential confounding variables. 
 
 ## Installation
 
@@ -201,46 +201,6 @@ analysis %>%
 
 #save_kable(tmp, file = 'fig/kable_example1.png', zoom = 4)
 knitr::include_graphics('fig/kable_example1.png')
-
-```
-
-# Proportional hazards
-
-```{r}
-
-data(veteran, package = 'randomForestSRC')
-
-vet <- as_tibble(veteran) %>%
-  mutate(
-    trt = factor(x = trt, labels = c("Standard", "Test")),
-    celltype = factor(
-      x = celltype,
-      labels = c('squamous', 'smallcell', 'adeno', 'large')
-    ),
-    prior = factor(x = prior, labels = c("No", "Yes"))
-  )
-
-m0 <- spec_empty(name = 'Unadjusted')
-m1 <- spec_add(m0, name = 'Model 1', age, prior)
-m2 <- spec_add(m1, name = 'Model 2', karno, diagtime)
-
-library(survival)
-library(formula.tools)
-
-main_hypothesis <- Surv(time, status) ~ trt
-
-analysis <- main_hypothesis %>% 
-  spec_embed(m0, m1, m2) %>% 
-  mutate(
-    fits = fit_apri(
-      formulas = formula,
-      data = drop_na(vet),
-      engine = 'cph'
-    )
-  ) %>% 
-  hoist_effect(fits, trt, ci = 0.95, transform = exp, ref = "1 ref")
-
-analysis
 
 ```
 
