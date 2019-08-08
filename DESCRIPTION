@@ -1,0 +1,36 @@
+Package: rpriori
+Type: Package
+Title: A grammar for testing apriori hypotheses in R
+Version: 0.0.0.9000
+Authors@R: c(
+    person(given = "Byron",
+           family = "Jaeger",
+           role = c("aut", "cre"),
+           email = "bcjaeger@uab.edu",
+           comment = c(ORCID = ""))
+           )
+Description: This package implements a framework that can be applied to
+  specify sequences of models that formally test apriori hypotheses 
+  regarding a given exposure.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Suggests: spelling
+Depends: 
+  dplyr,
+  tibble,
+  formula.tools
+Imports: 
+  geepack,
+  rlang,
+  survival,
+  tibbleOne,
+  tidyr,
+  tidyselect,
+  vctrs,
+  glue,
+  purrr,
+  magrittr
+Language: en-US
+RoxygenNote: 6.1.1
+Roxygen: list(markdown = TRUE)
