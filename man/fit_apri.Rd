@@ -6,7 +6,8 @@
 specifications. This function should be applied within the
 context of the \code{mutate()} function in the \code{dplyr} package.}
 \usage{
-fit_apri(formulas, data, engine = "lm", light_output = FALSE, ...)
+fit_apri(formulas, data, engine = "lm", fill_models = TRUE,
+  light_output = FALSE, ...)
 }
 \arguments{
 \item{formulas}{a list of formula objects}

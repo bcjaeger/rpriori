@@ -204,18 +204,24 @@ spec_describe <- function(model_spec){
 
 #' push a model specification into a model formula.
 #' @param model_spec a model specification object
-#' @param formula a formula with outcome(s) and exposure(s).
+#' @param formula a formula with outcome and exposure.
 
 spec_push <- function(model_spec, formula){
   
   vars_to_add <- paste(model_spec$control, collapse = ' + ')
   
-  update.formula(
+  exposure <- rhs.vars(formula)
+  
+  output <- update.formula(
     old = formula,
     new = as.formula(
       glue("~ . + {vars_to_add}")
     )
   )
+  
+  attr(output, 'exposure') <- exposure 
+  
+  output
   
 }
 
@@ -254,11 +260,13 @@ spec_embed <- function(formula, ...) {
     
   }
   
-  formulas <- expand.grid(
+  formula_data <- expand.grid(
     outcome = formula_lhs,
     exposure = rhs.vars(formula)
   ) %>% 
-    mutate(formula = paste(outcome, exposure, sep = ' ~ ')) %>% 
+    mutate(formula = paste(outcome, exposure, sep = ' ~ '))
+  
+  formulas <- formula_data %>% 
     pull(formula) %>% 
     map(as.formula) %>% 
     map(
@@ -272,12 +280,14 @@ spec_embed <- function(formula, ...) {
     ) %>% 
     flatten()
   
-  enframe(formulas, value = 'formula') %>% 
+  output <- enframe(formulas, value = 'formula') %>% 
     mutate(
       outcome = map_chr(formula, ~sf_labels(deparse(lhs(.x)))),
       exposure = map_chr(formula,~all.vars(rhs(.x))[1])
     ) %>% 
     select(name, outcome, exposure, formula)
+  
+  
   
 }
 

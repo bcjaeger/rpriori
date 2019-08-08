@@ -9,7 +9,7 @@ spec_push(model_spec, formula)
 \arguments{
 \item{model_spec}{a model specification object}
 
-\item{formula}{a formula with outcome(s) and exposure(s).}
+\item{formula}{a formula with outcome and exposure.}
 }
 \description{
 push a model specification into a model formula.

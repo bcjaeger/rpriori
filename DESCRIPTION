@@ -31,6 +31,6 @@ Imports:
   magrittr
 Suggests: spelling
 Language: en-US
+Encoding: UTF-8
 RoxygenNote: 6.1.1
 Roxygen: list(markdown = TRUE)
-Encoding: UTF-8

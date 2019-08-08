@@ -38,16 +38,20 @@ fit_apri <- function(
   formulas, 
   data, 
   engine = 'lm', 
+  fill_models = TRUE,
   light_output = FALSE,
   ...
 ) {
   
   .mvars <- get_model_variables(formulas, data)
   
-  .mrefs <- .mvars %>% 
+  mrefs <- .mvars %>% 
     filter(type %in% c('factor', 'ordered')) %>% 
     group_by(variable) %>% 
-    slice(1)
+    slice(1) %>% 
+    pull(term)
+  
+  .mvars %<>% mutate(ref = term %in% mrefs)
   
   .dots <- list(...)
   
@@ -113,29 +117,20 @@ fit_apri <- function(
     )
   }
   
-  map(
+  output <- map(
     .x = formulas,
     .f = fit_fun,
     data = data,
+    mvars = .mvars,
+    fill_models = fill_models,
     light_output = light_output,
     ...
   ) %>% 
     map(
       .f = function(mdl){
         
-        if(light_output){
-          
-          mdl$apri_data <- .mvars
-          mdl$refr_data <- .mrefs
-          class(mdl) <- 'light_model'
-          
-        } else {
-          
-          mdl$light_model$apri_data <- .mvars
-          mdl$light_model$refr_data <- .mrefs
-          
-        } 
-        
+        mdl$apri_data <- .mvars
+        class(mdl) <- "apri_fit"  
         mdl
         
       }
@@ -143,33 +138,126 @@ fit_apri <- function(
   
 }
 
+fill_estimates <- function(
+  model, 
+  exposure, 
+  fitter, 
+  apri_model, 
+  apri_data, 
+  ...
+){
+  
+  .dots <- list(...)
+  
+  variables = unique(apri_data$variable)
+  
+  variables_to_add <- setdiff(
+    x = variables,
+    y = rhs.vars(model$formula)
+  )
+  
+  apri_ref_coded <- apri_data %>% 
+    group_by(variable) %>% 
+    nest() %>% 
+    mutate(
+      data = map(
+        .x = data,
+        .f = function(df){
+          if(nrow(df) == 1) return(df) else return(df[-1, ])
+        }
+      )
+    ) %>% 
+    unnest() %>% 
+    filter(variable %in% variables_to_add)
+  
+  n_to_add <- nrow(apri_ref_coded)
+  
+  new_betas <- apri_model$betas
+  
+  new_covbs <- matrix(
+    data = NA_real_, 
+    nrow = nrow(apri_model$covbs) + n_to_add,
+    ncol = ncol(apri_model$covbs) + n_to_add
+  ) %>% 
+    set_colnames(
+      c(colnames(apri_model$covbs), apri_ref_coded$term)
+    ) %>% 
+    set_rownames(
+      c(rownames(apri_model$covbs), apri_ref_coded$term)
+    )
+  
+  new_covbs[colnames(apri_model$covbs), rownames(apri_model$covbs)] <- 
+    apri_model$covbs
+  
+  .frmla <- as.character(model$formula)
+  
+  for(v in variables_to_add){
+    
+    .dots$formula <- as.formula(glue("{.frmla} + {v} - {exposure}"))
+    .model <- do.call(fitter, args=.dots)
+    .covbs <- vcov(.model)
+    
+    vv <- apri_ref_coded %>% 
+      filter(variable == v) %>% 
+      pull(term)
+    
+    new_betas %<>% c(coef(.model)[vv])
+    new_covbs[rownames(.covbs), colnames(.covbs)] <- .covbs
+    
+  }
+  
+  list(
+    betas = new_betas,
+    covbs = new_covbs
+  )
+  
+  
+}
+
+
 glm_apri <- function(
   formula,
   data,
+  mvars,
+  fill_models,
   light_output,
   ...
 ) {
   
-  output <- glm(
+  exposure = attr(formula, 'exposure')
+  
+  model <- glm(
     formula = formula, 
     data = data,
     ...
   )
   
-  light_model <- list(
+  apri_model <- list(
     mcall = formula,
-    betas = coef(output),
-    covbs = vcov(output)
+    model = NULL,
+    betas = coef(model),
+    covbs = vcov(model)
   )
   
-  if(light_output){
-    return(light_model)
+  if (fill_models) {
+    apri_model <-
+      fill_estimates(
+        model = model,
+        exposure = exposure,
+        fitter = stats::glm,
+        apri_model = apri_model,
+        apri_data = mvars,
+        family = model$family$family,
+        data = data
+      )
   }
   
-  output$light_model <- light_model
-  output$call <- formula
-  output
+  if(!light_output){
+    apri_model$model = model
+  } 
   
+  apri_model
+
 }
 
 vcov.geeglm <- function(object, ...) {
@@ -198,17 +286,21 @@ gee_apri <- function(
     args = .dotdots
   )
   
-  light_model <- list(
+  apri_model <- list(
     mcall = formula,
     betas = coef(output),
     covbs = set_colnames(vcov(output), names(coef_output))
   )
   
-  if(light_output){
-    return(light_model)
+  if(fill_models){
+    apri_model <- fill_estimates(output, apri_model, mvars)
   }
   
-  output$light_model <- light_model
+  if(light_output){
+    return(apri_model)
+  }
+  
+  output$apri_model <- apri_model
   output$call <- formula
   output
   
@@ -227,17 +319,21 @@ lm_apri <- function(
     ...
   )
   
-  light_model <- list(
+  apri_model <- list(
     mcall = formula,
     betas = coef(output),
     covbs = vcov(output)
   )
   
-  if(light_output){
-    return(light_model)
+  if(fill_models){
+    apri_model <- fill_estimates(output, apri_model, mvars)
   }
   
-  output$light_model <- light_model
+  if(light_output){
+    return(apri_model)
+  }
+  
+  output$apri_model <- apri_model
   output$call <- formula
   output
   
@@ -256,22 +352,25 @@ cph_apri <- function(
     ...
   )
   
-  light_model <- list(
+  apri_model <- list(
     mcall = formula,
     betas = coef(output),
     covbs = vcov(output)
   )
   
-  if(light_output){
-    return(light_model)
+  if(fill_models){
+    apri_model <- fill_estimates(output, apri_model, mvars)
   }
   
-  output$light_model <- light_model
+  if(light_output){
+    return(apri_model)
+  }
+  
+  output$apri_model <- apri_model
   output$call <- formula
   output
 
 }
-
 
 #' Create a dataset with variable names, types, and 
 #'   the corresponding terms related to that variable 
@@ -355,7 +454,7 @@ get_model_variables <- function(formulas, data){
     
     nmrc_variables %<>% 
       purrr::set_names() %>% 
-      map(~ attr(data[[.x]], 'unit') %||% NA_character_ ) %>% 
+      map(~ attr(data[[.x]], 'unit') %||% "1 unit" ) %>% 
       enframe('variable', 'level') %>% 
       unnest() %>% 
       filter(!variable %in% outcome_variables) %>% 
@@ -389,7 +488,7 @@ get_model_variables <- function(formulas, data){
 
 # data = analysis
 # effect = 'pclass'
-# models = 'fits'
+# models = 'fit'
 # ci = 0.95
 # transform = exp
 # reference_label = '1 (Ref)'
@@ -417,7 +516,7 @@ hoist_effect <- function(
   
   model_col <- vars_pull(names(data), !!enquo(models))
   
-  apri_data <- get_apri_data(data[[model_col]][[1]])
+  apri_data <- data[[model_col]][[1]][["apri_data"]]
   
   model_variables <- unique(apri_data$variable)
   
@@ -435,36 +534,24 @@ hoist_effect <- function(
     .x = data[[model_col]],
     .f = function(mdl){
       
-      if(!inherits(mdl, 'light_model')){
-        
-        .mdl <- mdl$light_model
-        
-        betas <- enframe(.mdl$betas, name = 'term', value = 'eff')
-        covbs <- diag(.mdl$covbs) %>% 
-          enframe(name = 'term', value = 'err')
-        
-      } else {
-        
-        betas <- enframe(mdl$betas, name = 'term', value = 'eff')
-        covbs <- enframe(diag(mdl$covbs), name = 'term', value = 'err')
-        
-      }
+      betas <- enframe(mdl$betas, name = 'term', value = 'eff')
+      covbs <- enframe(diag(mdl$covbs), name = 'term', value = 'err')
       
-      effect_estm <- apri_data %>% 
-        filter(variable %in% mdl_eff) %>% 
+      effect_estm <- apri_data %>%
+        filter(variable %in% mdl_eff) %>%
         left_join(betas, by = 'term') %>%
-        left_join(covbs, by = 'term') 
+        left_join(covbs, by = 'term')
       
       if(!is.null(ci)) {
         
-        effect_estm %<>% 
+        effect_estm %<>%
           mutate(
-            err = if_else(level %in% mdl$refr_data$level, -1, err),
-            estimate = ci_format(
-              eff = eff, 
-              err = err, 
-              alpha = 1 - ci, 
-              fun = fun,
+            estimate = fmt_effect(
+              effect = eff,
+              error = err,
+              transform = fun,
+              conf_level = ci,
+              reference_index = which(ref),
               reference_label = reference_label
             )
           )
@@ -473,10 +560,9 @@ hoist_effect <- function(
         
         effect_estm %<>% 
           mutate(
-            eff = if_else(eff %in% mdl$refr_data$variable, 0, eff),
-            eff = fun(eff)
-          ) %>% 
-          rename(estimate = eff)
+            estimate = if_else(ref, 0, eff),
+            estimate = fun(estimate)
+          )
         
       }
       
@@ -517,10 +603,34 @@ hoist_effect <- function(
 
 get_apri_data <- function(model){
   
-  if(inherits(model, 'light_model')){
+  if(inherits(model, 'apri_model')){
     return(model$apri_data)
   } else {
-    return(model$light_model$apri_data)
+    return(model$apri_model$apri_data)
   }
+  
+}
+
+#' summarize an `apri_fit` object.
+#' 
+#' @param object an object of class `apri_fit`
+#' @param ... additional arguments affecting the summary values.
+#' @export
+
+summary.apri_fit <- function(object, ...){
+  
+  betas <- enframe(object$betas, name = 'term', value = 'estimate')
+  covbs <- enframe(diag(object$covbs), name = 'term', value = 'std.error')
+  
+  object$apri_data %>% 
+    left_join(betas, by = 'term') %>% 
+    left_join(covbs, by = 'term') %>% 
+    mutate_at(
+      .vars = vars(estimate, std.error),
+      .funs = ~ {
+        .x[ref] = 0
+        .x
+      }
+    )
   
 }
