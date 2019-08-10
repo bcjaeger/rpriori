@@ -1,6 +1,7 @@
 ## code to prepare `titanic` dataset goes here
 
 library(titanic)
+library(tidyverse)
 
 titanic <- titanic_train %>% 
   as_tibble() %>% 

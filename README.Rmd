@@ -34,9 +34,9 @@ You can install the development version from [GitHub](https://github.com/) with:
 # install.packages("remotes")
 remotes::install_github("bcjaeger/rpriori")
 ```
-# Logistic regression 
+## Example 
 
-Here are the packages we'll use for this example:
+Let's use the `titanic` data to show how the pieces of `rpriori` fit together. The first thing we need is to load some packages:
 
 ```{r setup, message = FALSE, warn = FALSE}
 
@@ -50,33 +50,32 @@ library(geepack)
 
 ```
 
-
-Let's use the `titanic` data to show how the pieces of `rpriori` fit together. The first thing we need is a question that we can engage with using a-priori models. Let's investigate whether survival on the titanic was associated with ticket class. We'll start by initiating an empty model.
+The next thing we need is a question that we can engage with using a-priori model specifications. Let's investigate whether survival on the titanic was associated with ticket class. We'll start by initiating an empty model.
 
 ```{r}
 
 # Make an unadjusted model
-m0  <- spec_empty("Model 0")
+m0  <- mspec_empty("Model 0")
 
-# spec_describe(spec) is the same as print(spec)
-spec_describe(m0)
+# mspec_describe(mspec) is the same as print(mspec)
+mspec_describe(m0)
 
 ```
 
-Now we can Model 1, a descendant of the unadjusted model.
+Now we can make Model 1, a descendant of the unadjusted model.
 
 ```{r}
 
 # Model 1 includes adjustment for sex and age
-m1  <- spec_add(m0, name = "Model 1", sex, age)
+m1  <- mspec_add(m0, name = "Model 1", sex, age)
 
 m1
 
 # model 0 is automatically set as the parent since m0
-# was supplied to spec_add.
+# was supplied to mspec_add.
 m1$parent$name
 
-# relation is automatically set by the spec_add function
+# relation is automatically set by the mspec_add function
 m1$relation
 
 ```
@@ -86,26 +85,51 @@ And now we can make descendants of model 1.
 ```{r}
 
 # Model 2a = model 1 + no. of siblings/spouses
-m2a <- spec_add(m1, name = 'Model 2a', sibsp)
+m2a <- mspec_add(m1, name = 'Model 2a', sibsp)
 
 # Model 2b = model 1 + no. of parents/children
-m2b <- spec_add(m1, name = 'Model 2b', parch)
+m2b <- mspec_add(m1, name = 'Model 2b', parch)
 
 # Model 3 = model 1, swapping out age for ticket fare
-m3 <- spec_sub(m1, name = 'Model 3', age = fare)
+m3 <- mspec_sub(m1, name = 'Model 3', age = fare)
 
 ```
 
-What comes next? Our specifications are set, but they are separate. They also haven't been embedded into the main question of interest, i.e. `survival ~ pclass`. We can pull these specifications together into an object that encapsulates our main hypothesis with `spec_embed` 
+What comes next? Our specifications are set, but they are separate. They also haven't been embedded into the main question of interest, i.e. `survival ~ pclass`. We can pull these specifications together into an object that encapsulates our main hypothesis with `mspec_embed` 
 
 ```{r}
 
+ttnc <- drop_na(titanic) %>% 
+  mutate(survived = as.numeric(survived) - 1)
+
 main_hypothesis <- survived ~ pclass
 
-analysis <- main_hypothesis %>% 
-  spec_embed(m0, m1, m2a, m2b, m3)
+apri <- main_hypothesis %>% embed_mspecs(m0, m1, m2a, m2b, m3)
+
+apri
 
 ```
+
+Embed data! (fill this in)
+
+```{r}
+
+apri %<>% embed_data(
+  data = ttnc,
+  pclass = 'Ticket class',
+  sex = 'Sex',
+  age = 'Passenger age', 
+  sibsp = 'No. of siblings/spouses',
+  parch = 'No. of parents/children',
+  fare = 'Price of ticket'
+)
+
+names(apri)
+
+apri
+
+```
+
 
 The next step is to fit models defined by the specifications in `analysis`. Here, we use the `fit_apri()` function, which spans multiple different modeling frameworks, including 
 
@@ -115,26 +139,55 @@ The next step is to fit models defined by the specifications in `analysis`. Here
 
 3. Cox proportional hazards models (`engine = 'cph'`). 
 
-Additionally, `fit_apri()` is designed to work with lists of formulas, making it pair well with the `mutate()` function in the `dplyr` package.
+Here we will use the `glm` engine to make a set of logistic regression models.
 
 ```{r}
 
-# formulas = analysis$formula
-# data = drop_na(titanic)
-# light_output = TRUE
-# family = binomial(link = 'logit')
-# engine = 'glm'
 
-analysis %<>%
-  mutate(
-    fit = fit_apri(
-      formulas = formula,
-      data = drop_na(titanic),
-      family = binomial(link = 'logit'),
-      engine = 'glm',
-      light_output = TRUE 
-    )
+apri_heavy <- apri %>% 
+  embed_fits(
+    engine = 'glm', 
+    family = binomial(link = 'logit'),
+    keep_models = TRUE
   )
+
+# It's nice to check the original models, whether you 
+# want to do diagnostics or just make sure they are
+# specified the way you expect them to be specified.
+# Keep em with keep_models = TRUE
+
+mdls <- apri_heavy %>% 
+  pull_analysis() %>% 
+  pluck("fit") %>% 
+  map("model")
+
+summary(mdls[[1]])
+
+# But sometimes you may prefer to manage your 
+# memory, and model objects tend to eat that up.
+# Dump em with keep_models = FALSE.
+
+apri_light <- apri %>% 
+  embed_fits(
+    engine = 'glm', 
+    family = binomial(link = 'logit'),
+    keep_models = FALSE
+  )
+
+# Note that you can keep the original models 
+# if you want, but usually all you need is
+# the output from embed_fits(). Here, the 
+# heavy apri object requires 35 times as
+# much memory as the light version
+
+object.size(apri_heavy) / object.size(apri_light)
+
+# we'll use the light apri object for the
+# rest of this tutorial.
+
+rm(apri_heavy)
+
+apri <- apri_light
 
 ```
 
@@ -142,8 +195,8 @@ Now we can dig a little deeper into these models. How about we start by peeking 
 
 ```{r}
 
-analysis %>% 
-  hoist_effect(fit, effect = pclass)
+apri %>% 
+  hoist_effect(pclass)
 
 
 ```
@@ -152,17 +205,17 @@ Neat, but maybe not as easy to read as it could be. `hoist_effect` has a few aes
 
 ```{r}
 
-analysis %>% 
-  hoist_effect(fit, effect = pclass, transform = exp)
+apri %>% 
+  hoist_effect(effect = pclass, transform = exp)
 
 ```
 
-Okay! Now we have odds-ratios instead of regression coefficients, and we can easily see that, according to the apriori models we specified, ticket class has a pretty strong effect. A natural follow-up question is how much uncertainty we have regarding those point estimates, and a natural follow-up answer is to use the `ci` input argument of `hoist_effect` like so:
+Now we have odds-ratios instead of regression coefficients. According to the apriori models, ticket class has a strong effect on survival. A natural follow-up question is how much uncertainty we have regarding those point estimates, and a natural follow-up answer is to use the `ci` input argument of `hoist_effect` like so:
 
 ```{r}
 
-analysis %>% 
-  hoist_effect(fit, effect = pclass, ci = 0.95, transform = exp)
+apri %>% 
+  hoist_effect(effect = pclass, ci = 0.95, transform = exp)
 
 
 ```
@@ -172,11 +225,11 @@ This type of output can be passed right into your favorite table function.
 ```{r, eval = FALSE}
 
 footer <- list(m0, m1, m2a, m2b, m3) %>% 
-  map_chr(spec_describe)
+  map_chr(mspec_describe)
 
-analysis %>% 
-  hoist_effect(fit, effect = pclass, ci = 0.95, transform = exp) %>% 
-  select(name, First, Second, Third) %>% 
+apri %>% 
+  hoist_effect(pclass, ci = 0.95, transform = exp) %>% 
+  pull_analysis(name, First, Second, Third) %>% 
   kable(
     col.names = c(glue("Model{footnote_marker_symbol(1)}"), names(.)[-1]), 
     align = 'lccc', 
@@ -213,7 +266,7 @@ This approach is standard for population science papers and it can also creat ve
 
 # Summary of unadjusted relationships between survival
 # and each of the variables used in this analysis.
-summary(analysis$fit[[1]])
+summary(apri$analysis$fit[[1]])
 
 ```
 
@@ -221,22 +274,81 @@ These summaries are meant to be fairly easy to manipulate using `dplyr` and othe
 
 ```{r}
 
-analysis %>% 
+lbl <- map(apri$fit_data, attr, 'label') %>% 
+  purrr::discard(is.null)
+
+apri_tbl <- apri %>%
+  pull_analysis() %>% 
   mutate(mdl_smry = map(fit, summary)) %>% 
   select(name, mdl_smry) %>% 
   unnest() %>% 
   mutate(
+    variable = recode(variable, !!!lbl),
     tbl_value = fmt_effect(
       effect = estimate,
-      error = std.error,
+      std.error = std.error,
       transform = exp,
       conf_level = 0.95,
       reference_index = which(ref),
-      reference_label = '1 (ref)'
+      reference_label = '1 (reference)'
     )
   ) %>% 
   select(name, variable, level, tbl_value) %>% 
-  spread(name, tbl_value)
+  spread(name, tbl_value) 
+
+apri_tbl
 
 ```
+
+With a little tomfoolery, this can be presented in a clean table suitable for a journal article. (This code will someday be formalized into a more intuitive function).
+
+```{r, eval = FALSE}
+
+kable_data <- apri_tbl %>% 
+  group_by(variable) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  arrange(n, variable) %>% 
+  mutate_if(is.factor, as.character) %>% 
+  mutate(
+    level = if_else(
+      n == 1,
+      paste(variable, level, sep = ', '), 
+      level
+    )
+  )
+
+grp_index <- table(kable_data$variable)
+names(grp_index)[grp_index==1] <- " "
+
+control <- list(m0, m1, m2a, m2b, m3)
+footer <- map_chr(control, mspec_describe)
+
+model_recoder <- control %>% 
+  map_chr('name') %>% 
+  paste0(footnote_marker_symbol(1:length(.)))
+
+footnote_symbols <- kableExtra::footnote_marker_symbol(1:5)
+
+kable_data %>% 
+  select(-variable, -n) %>% 
+  kable(
+    align = c('l',rep('c',ncol(.)-1)),
+    col.names = c("Characteristic", model_recoder),
+    escape = FALSE
+  ) %>% 
+  kable_styling() %>% 
+  pack_rows(index = grp_index) %>% 
+  footnote(symbol = footer)
+
+```
+
+
+```{r, echo = FALSE}
+
+#save_kable(tmp, file = 'fig/kable_example1.png', zoom = 4)
+knitr::include_graphics('fig/kable_example2.png')
+
+```
+
 

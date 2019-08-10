@@ -28,9 +28,10 @@ You can install the development version from
 remotes::install_github("bcjaeger/rpriori")
 ```
 
-# Logistic regression
+## Example
 
-Here are the packages we’ll use for this example:
+Let’s use the `titanic` data to show how the pieces of `rpriori` fit
+together. The first thing we need is to load some packages:
 
 ``` r
 
@@ -43,38 +44,63 @@ library(kableExtra)
 library(geepack)
 ```
 
-Let’s use the `titanic` data to show how the pieces of `rpriori` fit
-together. The first thing we need is a question that we can engage with
-using a-priori models. Let’s investigate whether survival on the titanic
-was associated with ticket class. We’ll start by initiating an empty
-model.
+The next thing we need is a question that we can engage with using
+a-priori model specifications. Let’s investigate whether survival on the
+titanic was associated with ticket class. We’ll start by initiating an
+empty model.
 
 ``` r
 
 # Make an unadjusted model
-m0  <- spec_empty("Model 0")
+m0  <- mspec_empty("Model 0")
 
-# spec_describe(spec) is the same as print(spec)
-spec_describe(m0)
+# mspec_describe(mspec) is the same as print(mspec)
+mspec_describe(m0)
 #> [1] "Model 0 is unadjusted."
 ```
 
-Now we can Model 1, a descendant of the unadjusted model.
+Now we can make Model 1, a descendant of the unadjusted model.
 
 ``` r
 
 # Model 1 includes adjustment for sex and age
-m1  <- spec_add(m0, name = "Model 1", sex, age)
+m1  <- mspec_add(m0, name = "Model 1", sex, age)
 
 m1
-#> [1] "Model 1 includes adjustment for sex and age."
+#> $name
+#> [1] "Model 1"
+#> 
+#> $control
+#> [1] "1"   "sex" "age"
+#> 
+#> $parent
+#> $name
+#> [1] "Model 0"
+#> 
+#> $control
+#> [1] "1"
+#> 
+#> $parent
+#> NULL
+#> 
+#> $relation
+#> NULL
+#> 
+#> attr(,"class")
+#> [1] "apri_mspec"
+#> 
+#> $relation
+#> [1] "add"
+#> 
+#> attr(,"class")
+#> [1] "apri_mspec"
 
 # model 0 is automatically set as the parent since m0
-# was supplied to spec_add.
+# was supplied to mspec_add.
 m1$parent$name
 #> [1] "Model 0"
 
-# relation is automatically set by the spec_add function
+# relation is automatically set by the mspec_add function
 m1$relation
 #> [1] "add"
 ```
@@ -84,26 +110,74 @@ And now we can make descendants of model 1.
 ``` r
 
 # Model 2a = model 1 + no. of siblings/spouses
-m2a <- spec_add(m1, name = 'Model 2a', sibsp)
+m2a <- mspec_add(m1, name = 'Model 2a', sibsp)
 
 # Model 2b = model 1 + no. of parents/children
-m2b <- spec_add(m1, name = 'Model 2b', parch)
+m2b <- mspec_add(m1, name = 'Model 2b', parch)
 
 # Model 3 = model 1, swapping out age for ticket fare
-m3 <- spec_sub(m1, name = 'Model 3', age = fare)
+m3 <- mspec_sub(m1, name = 'Model 3', age = fare)
 ```
 
 What comes next? Our specifications are set, but they are separate. They
 also haven’t been embedded into the main question of interest,
 i.e. `survival ~ pclass`. We can pull these specifications together
-into an object that encapsulates our main hypothesis with `spec_embed`
+into an object that encapsulates our main hypothesis with `mspec_embed`
 
 ``` r
 
+ttnc <- drop_na(titanic) %>% 
+  mutate(survived = as.numeric(survived) - 1)
+
 main_hypothesis <- survived ~ pclass
 
-analysis <- main_hypothesis %>% 
-  spec_embed(m0, m1, m2a, m2b, m3)
+apri <- main_hypothesis %>% embed_mspecs(m0, m1, m2a, m2b, m3)
+
+apri
+#> # A tibble: 5 x 4
+#>   name     outcome  exposure formula  
+#>   <chr>    <chr>    <chr>    <list>   
+#> 1 Model 0  survived pclass   <formula>
+#> 2 Model 1  survived pclass   <formula>
+#> 3 Model 2a survived pclass   <formula>
+#> 4 Model 2b survived pclass   <formula>
+#> 5 Model 3  survived pclass   <formula>
+```
+
+Embed data\! (fill this in)
+
+``` r
+
+apri %<>% embed_data(
+  data = ttnc,
+  pclass = 'Ticket class',
+  sex = 'Sex',
+  age = 'Passenger age', 
+  sibsp = 'No. of siblings/spouses',
+  parch = 'No. of parents/children',
+  fare = 'Price of ticket'
+)
+
+names(apri)
+#> [1] "analysis" "var_data" "fit_data"
+
+apri
+#> A priori model specifications for assessing survived ~ pclass: 
+#>   Model 0 is unadjusted.
+#>   Model 1 includes adjustment for sex and age.
+#>   Model 2a includes adjustment for variables in Model 1 plus sibsp.
+#>   Model 2b includes adjustment for variables in Model 1 plus parch.
+#>   Model 3 includes adjustment for variables in Model 1 with fare replacing age.
+#> 
+#>  Analysis object 
+#> # A tibble: 5 x 4
+#>   name     outcome  exposure formula  
+#>   <chr>    <chr>    <chr>    <list>   
+#> 1 Model 0  survived pclass   <formula>
+#> 2 Model 1  survived pclass   <formula>
+#> 3 Model 2a survived pclass   <formula>
+#> 4 Model 2b survived pclass   <formula>
+#> 5 Model 3  survived pclass   <formula>
 ```
 
 The next step is to fit models defined by the specifications in
@@ -118,27 +192,80 @@ different modeling frameworks, including
 
 3.  Cox proportional hazards models (`engine = 'cph'`).
 
-Additionally, `fit_apri()` is designed to work with lists of formulas,
-making it pair well with the `mutate()` function in the `dplyr` package.
+Here we will use the `glm` engine to make a set of logistic regression
+models.
 
 ``` r
 
-# formulas = analysis$formula
-# data = drop_na(titanic)
-# light_output = TRUE
-# family = binomial(link = 'logit')
-# engine = 'glm'
 
-analysis %<>%
-  mutate(
-    fit = fit_apri(
-      formulas = formula,
-      data = drop_na(titanic),
-      family = binomial(link = 'logit'),
-      engine = 'glm',
-      light_output = TRUE 
-    )
+apri_heavy <- apri %>% 
+  embed_fits(
+    engine = 'glm', 
+    family = binomial(link = 'logit'),
+    keep_models = TRUE
   )
+
+# It's nice to check the original models, whether you 
+# want to do diagnostics or just make sure they are
+# specified the way you expect them to be specified.
+# Keep em with keep_models = TRUE
+
+mdls <- apri_heavy %>% 
+  pull_analysis() %>% 
+  pluck("fit") %>% 
+  map("model")
+
+summary(mdls[[1]])
+#> 
+#> Call:
+#> survived ~ pclass
+#> 
+#> Deviance Residuals: 
+#>     Min       1Q   Median       3Q      Max  
+#> -1.4607  -0.7399  -0.7399   0.9184   1.6908  
+#> 
+#> Coefficients:
+#>              Estimate Std. Error z value Pr(>|z|)    
+#> (Intercept)    0.6451     0.1543   4.180 2.92e-05 ***
+#> pclassSecond  -0.7261     0.2168  -3.350 0.000808 ***
+#> pclassThird   -1.8009     0.1982  -9.086  < 2e-16 ***
+#> ---
+#> Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+#> 
+#> (Dispersion parameter for binomial family taken to be 1)
+#> 
+#>     Null deviance: 964.52  on 713  degrees of freedom
+#> Residual deviance: 869.81  on 711  degrees of freedom
+#> AIC: 875.81
+#> 
+#> Number of Fisher Scoring iterations: 4
+
+# But sometimes you may prefer to manage your 
+# memory, and model objects tend to eat that up.
+# Dump em with keep_models = FALSE.
+
+apri_light <- apri %>% 
+  embed_fits(
+    engine = 'glm', 
+    family = binomial(link = 'logit'),
+    keep_models = FALSE
+  )
+
+# Note that you can keep the original models 
+# if you want, but usually all you need is
+# the output from embed_fits(). Here, the 
+# heavy apri object requires 35 times as
+# much memory as the light version
+
+object.size(apri_heavy) / object.size(apri_light)
+#> 35.1 bytes
+
+# we'll use the light apri object for the
+# rest of this tutorial.
+
+rm(apri_heavy)
+
+apri <- apri_light
 ```
 
 Now we can dig a little deeper into these models. How about we start by
@@ -150,8 +277,16 @@ just specify `effect = pclass`.
 
 ``` r
 
-analysis %>% 
-  hoist_effect(fit, effect = pclass)
+apri %>% 
+  hoist_effect(pclass)
+#> A priori model specifications for assessing survived ~ pclass: 
+#>   Model 0 is unadjusted.
+#>   Model 1 includes adjustment for sex and age.
+#>   Model 2a includes adjustment for variables in Model 1 plus sibsp.
+#>   Model 2b includes adjustment for variables in Model 1 plus parch.
+#>   Model 3 includes adjustment for variables in Model 1 with fare replacing age.
+#> 
+#>  Analysis object 
 #> # A tibble: 5 x 8
 #>   name     outcome  exposure formula   fit        First Second Third
 #>   <chr>    <chr>    <chr>    <list>    <list>     <dbl>  <dbl> <dbl>
@@ -169,8 +304,16 @@ log-scale, we can exponentiate them:
 
 ``` r
 
-analysis %>% 
-  hoist_effect(fit, effect = pclass, transform = exp)
+apri %>% 
+  hoist_effect(effect = pclass, transform = exp)
+#> A priori model specifications for assessing survived ~ pclass: 
+#>   Model 0 is unadjusted.
+#>   Model 1 includes adjustment for sex and age.
+#>   Model 2a includes adjustment for variables in Model 1 plus sibsp.
+#>   Model 2b includes adjustment for variables in Model 1 plus parch.
+#>   Model 3 includes adjustment for variables in Model 1 with fare replacing age.
+#> 
+#>  Analysis object 
 #> # A tibble: 5 x 8
 #>   name     outcome  exposure formula   fit        First Second  Third
 #>   <chr>    <chr>    <chr>    <list>    <list>     <dbl>  <dbl>  <dbl>
@@ -181,25 +324,32 @@ analysis %>%
 #> 5 Model 3  survived pclass   <formula> <apri_fit>     1  0.449 0.160
 ```
 
-Okay\! Now we have odds-ratios instead of regression coefficients, and
-we can easily see that, according to the apriori models we specified,
-ticket class has a pretty strong effect. A natural follow-up question is
-how much uncertainty we have regarding those point estimates, and a
-natural follow-up answer is to use the `ci` input argument of
-`hoist_effect` like so:
+Now we have odds-ratios instead of regression coefficients. According to
+the apriori models, ticket class has a strong effect on survival. A
+natural follow-up question is how much uncertainty we have regarding
+those point estimates, and a natural follow-up answer is to use the `ci`
+input argument of `hoist_effect` like so:
 
 ``` r
 
-analysis %>% 
-  hoist_effect(fit, effect = pclass, ci = 0.95, transform = exp)
+apri %>% 
+  hoist_effect(effect = pclass, ci = 0.95, transform = exp)
+#> A priori model specifications for assessing survived ~ pclass: 
+#>   Model 0 is unadjusted.
+#>   Model 1 includes adjustment for sex and age.
+#>   Model 2a includes adjustment for variables in Model 1 plus sibsp.
+#>   Model 2b includes adjustment for variables in Model 1 plus parch.
+#>   Model 3 includes adjustment for variables in Model 1 with fare replacing age.
+#> 
+#>  Analysis object 
 #> # A tibble: 5 x 8
 #>   name    outcome  exposure formula  fit     First    Second     Third     
 #>   <chr>   <chr>    <chr>    <list>   <list>  <chr>    <chr>      <chr>     
-#> 1 Model 0 survived pclass   <formul~ <apri_~ 1 (refe~ 0.48 (0.4~ 0.17 (0.1~
-#> 2 Model 1 survived pclass   <formul~ <apri_~ 1 (refe~ 0.27 (0.2~ 0.08 (0.0~
-#> 3 Model ~ survived pclass   <formul~ <apri_~ 1 (refe~ 0.24 (0.2~ 0.07 (0.0~
-#> 4 Model ~ survived pclass   <formul~ <apri_~ 1 (refe~ 0.27 (0.2~ 0.08 (0.0~
-#> 5 Model 3 survived pclass   <formul~ <apri_~ 1 (refe~ 0.45 (0.3~ 0.16 (0.1~
+#> 1 Model 0 survived pclass   <formul~ <apri_~ 1 (refe~ 0.48 (0.3~ 0.17 (0.1~
+#> 2 Model 1 survived pclass   <formul~ <apri_~ 1 (refe~ 0.27 (0.1~ 0.08 (0.0~
+#> 3 Model ~ survived pclass   <formul~ <apri_~ 1 (refe~ 0.24 (0.1~ 0.07 (0.0~
+#> 4 Model ~ survived pclass   <formul~ <apri_~ 1 (refe~ 0.27 (0.1~ 0.08 (0.0~
+#> 5 Model 3 survived pclass   <formul~ <apri_~ 1 (refe~ 0.45 (0.2~ 0.16 (0.0~
 ```
 
 This type of output can be passed right into your favorite table
@@ -208,11 +358,11 @@ function.
 ``` r
 
 footer <- list(m0, m1, m2a, m2b, m3) %>% 
-  map_chr(spec_describe)
+  map_chr(mspec_describe)
 
-analysis %>% 
-  hoist_effect(fit, effect = pclass, ci = 0.95, transform = exp) %>% 
-  select(name, First, Second, Third) %>% 
+apri %>% 
+  hoist_effect(pclass, ci = 0.95, transform = exp) %>% 
+  pull_analysis(name, First, Second, Third) %>% 
   kable(
     col.names = c(glue("Model{footnote_marker_symbol(1)}"), names(.)[-1]), 
     align = 'lccc', 
@@ -261,19 +411,19 @@ process outlined above:
 
 # Summary of unadjusted relationships between survival
 # and each of the variables used in this analysis.
-summary(analysis$fit[[1]])
-#> # A tibble: 9 x 7
-#>   variable level  term         type    ref   estimate std.error
-#>   <chr>    <chr>  <chr>        <chr>   <lgl>    <dbl>     <dbl>
-#> 1 age      1 unit age          numeric FALSE  -0.0110   -0.0110
-#> 2 sibsp    1 unit sibsp        integer FALSE  -0.0384   -0.0384
-#> 3 parch    1 unit parch        integer FALSE   0.220     0.220 
-#> 4 fare     1 unit fare         numeric FALSE   0.0160    0.0160
-#> 5 pclass   First  pclassFirst  factor  TRUE    0         0     
-#> 6 pclass   Second pclassSecond factor  FALSE  -0.726    -0.726 
-#> 7 pclass   Third  pclassThird  factor  FALSE  -1.80     -1.80  
-#> 8 sex      Male   sexMale      factor  TRUE    0         0     
-#> 9 sex      Female sexFemale    factor  FALSE   2.48      2.48
+summary(apri$analysis$fit[[1]])
+#> # A tibble: 9 x 8
+#>   variable term         level  ref   estimate std.error   pv_term   pv_ovrl
+#>   <fct>    <fct>        <fct>  <lgl>    <dbl>     <dbl>     <dbl>     <dbl>
+#> 1 pclass   pclassFirst  First  TRUE   NA        0       NA        NA       
+#> 2 pclass   pclassSecond Second FALSE  -0.726    0.217    8.08e- 4  2.72e-21
+#> 3 pclass   pclassThird  Third  FALSE  -1.80     0.198    1.03e-19  2.72e-21
+#> 4 age      age          1 unit FALSE  -0.0110   0.00533  3.97e- 2  3.97e- 2
+#> 5 sibsp    sibsp        1 unit FALSE  -0.0384   0.0828   6.43e- 1  6.43e- 1
+#> 6 parch    parch        1 unit FALSE   0.220    0.0898   1.42e- 2  1.42e- 2
+#> 7 fare     fare         1 unit FALSE   0.0160   0.00250  1.61e-10  1.61e-10
+#> 8 sex      sexMale      Male   TRUE    0        0       NA        NA       
+#> 9 sex      sexFemale    Female FALSE   2.48     0.185    6.70e-41  6.70e-41
 ```
 
 These summaries are meant to be fairly easy to manipulate using `dplyr`
@@ -285,32 +435,85 @@ apriori.
 
 ``` r
 
-analysis %>% 
+lbl <- map(apri$fit_data, attr, 'label') %>% 
+  purrr::discard(is.null)
+
+apri_tbl <- apri %>%
+  pull_analysis() %>% 
   mutate(mdl_smry = map(fit, summary)) %>% 
   select(name, mdl_smry) %>% 
   unnest() %>% 
   mutate(
+    variable = recode(variable, !!!lbl),
     tbl_value = fmt_effect(
       effect = estimate,
-      error = std.error,
+      std.error = std.error,
       transform = exp,
       conf_level = 0.95,
       reference_index = which(ref),
-      reference_label = '1 (ref)'
+      reference_label = '1 (reference)'
     )
   ) %>% 
   select(name, variable, level, tbl_value) %>% 
-  spread(name, tbl_value)
+  spread(name, tbl_value) 
+
+apri_tbl
 #> # A tibble: 9 x 7
-#>   variable level  `Model 0`   `Model 1`  `Model 2a`  `Model 2b`  `Model 3` 
-#>   <chr>    <chr>  <chr>       <chr>      <chr>       <chr>       <chr>     
-#> 1 age      1 unit 0.99 (1.01~ 0.96 (1.0~ 0.96 (1.04~ 0.96 (1.04~ 0.99 (1.0~
-#> 2 fare     1 unit 1.02 (0.98~ 1.01 (0.9~ 1.02 (0.98~ 1.02 (0.99~ 1.00 (1.0~
-#> 3 parch    1 unit 1.25 (0.81~ 0.86 (1.1~ 0.94 (1.07~ 0.86 (1.15~ 0.75 (1.3~
-#> 4 pclass   First  1 (ref)     1 (ref)    1 (ref)     1 (ref)     1 (ref)   
-#> 5 pclass   Second 0.48 (2.01~ 0.27 (3.5~ 0.24 (3.89~ 0.27 (3.58~ 0.45 (2.1~
-#> 6 pclass   Third  0.17 (5.63~ 0.08 (11.~ 0.07 (12.8~ 0.08 (11.9~ 0.16 (5.8~
-#> 7 sex      Female 11.9 (0.09~ 12.5 (0.0~ 13.8 (0.08~ 13.3 (0.08~ 12.8 (0.0~
-#> 8 sex      Male   1 (ref)     1 (ref)    1 (ref)     1 (ref)     1 (ref)   
-#> 9 sibsp    1 unit 0.96 (1.04~ 0.74 (1.3~ 0.68 (1.44~ 0.76 (1.30~ 0.69 (1.4~
+#>   variable   level  `Model 0`   `Model 1`  `Model 2a` `Model 2b` `Model 3` 
+#>   <fct>      <fct>  <chr>       <chr>      <chr>      <chr>      <chr>     
+#> 1 Ticket cl~ First  1 (referen~ 1 (refere~ 1 (refere~ 1 (refere~ 1 (refere~
+#> 2 Ticket cl~ Second 0.48 (0.32~ 0.27 (0.1~ 0.24 (0.1~ 0.27 (0.1~ 0.45 (0.2~
+#> 3 Ticket cl~ Third  0.17 (0.11~ 0.08 (0.0~ 0.07 (0.0~ 0.08 (0.0~ 0.16 (0.0~
+#> 4 Passenger~ 1 unit 0.99 (0.98~ 0.99 (0.9~ 0.99 (0.9~ 0.99 (0.9~ 0.99 (0.9~
+#> 5 No. of si~ 1 unit 0.96 (0.82~ 0.74 (0.6~ 0.74 (0.6~ 0.76 (0.6~ 0.69 (0.5~
+#> 6 No. of pa~ 1 unit 1.25 (1.05~ 0.86 (0.6~ 0.94 (0.7~ 0.86 (0.6~ 0.75 (0.6~
+#> 7 Price of ~ 1 unit 1.02 (1.01~ 1.01 (1.0~ 1.02 (1.0~ 1.02 (1.0~ 1.01 (1.0~
+#> 8 Sex        Male   1 (referen~ 1 (refere~ 1 (refere~ 1 (refere~ 1 (refere~
+#> 9 Sex        Female 11.9 (8.29~ 11.8 (8.1~ 12.8 (8.7~ 12.7 (8.6~ 10.8 (7.4~
 ```
+
+With a little tomfoolery, this can be presented in a clean table
+suitable for a journal article. (This code will someday be formalized
+into a more intuitive function).
+
+``` r
+
+kable_data <- apri_tbl %>% 
+  group_by(variable) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  arrange(n, variable) %>% 
+  mutate_if(is.factor, as.character) %>% 
+  mutate(
+    level = if_else(
+      n == 1,
+      paste(variable, level, sep = ', '), 
+      level
+    )
+  )
+
+grp_index <- table(kable_data$variable)
+names(grp_index)[grp_index==1] <- " "
+
+control <- list(m0, m1, m2a, m2b, m3)
+footer <- map_chr(control, mspec_describe)
+
+model_recoder <- control %>% 
+  map_chr('name') %>% 
+  paste0(footnote_marker_symbol(1:length(.)))
+
+footnote_symbols <- kableExtra::footnote_marker_symbol(1:5)
+
+kable_data %>% 
+  select(-variable, -n) %>% 
+  kable(
+    align = c('l',rep('c',ncol(.)-1)),
+    col.names = c("Characteristic", model_recoder),
+    escape = FALSE
+  ) %>% 
+  kable_styling() %>% 
+  pack_rows(index = grp_index) %>% 
+  footnote(symbol = footer)
+```
+
+<img src="fig/kable_example2.png" width="100%" />

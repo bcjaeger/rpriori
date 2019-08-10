@@ -29,7 +29,9 @@ Imports:
   glue,
   purrr,
   magrittr
-Suggests: spelling
+Suggests: 
+    spelling,
+    testthat (>= 2.1.0)
 Language: en-US
 Encoding: UTF-8
 RoxygenNote: 6.1.1

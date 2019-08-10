@@ -5,19 +5,19 @@
 \title{get the estimated effects for a designated exposure variable
 from a set of statistical models fitted using apriori specs.}
 \usage{
-hoist_effect(data, models, effect, ci = NULL, transform = NULL,
+hoist_effect(data, effect, ci = NULL, transform = NULL,
   reference_label = "1 (reference)")
 }
 \arguments{
 \item{data}{a dataset with containing a list of models}
-
-\item{models}{a column in dataset containing a list of models}
 
 \item{effect}{(character or literal) the effect to hoist}
 
 \item{ci}{a numeric value between 0 and 1 indicating desired
 confidence level for interval estimates. If left unspecified,
 confidence intervals will not be included in the output.}
+
+\item{models}{a column in dataset containing a list of models}
 
 \item{fun}{a function that will be applied to the model's
 estimated regression coefficients. For example, it is common

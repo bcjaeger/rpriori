@@ -7,19 +7,20 @@
 #'
 #' @import dplyr
 #' @import tibble
-#' @import formula.tools
+#' @importFrom forcats fct_inorder
+#' @importFrom rlang %||% is_character ensyms
 #' @importFrom vctrs vec_size vec_is_empty
-#' @importFrom rlang %||% is_character 
+#' @importFrom tidyr unnest spread
+#' @importFrom purrr map map_dfr map_chr map_dbl map_lgl 
+#'   set_names modify pluck reduce flatten
+#' @importFrom tidyselect vars_pull
+#' @importFrom formula.tools lhs rhs lhs.vars rhs.vars is.one.sided
 #' @importFrom geepack geeglm
 #' @importFrom stats glm lm qnorm coef vcov as.formula update.formula
 #' @importFrom survival coxph
-#' @importFrom tidyr unnest spread
 #' @importFrom glue glue glue_collapse
-#' @importFrom purrr map map_dfr map_chr map_dbl map_lgl 
-#'   set_names modify pluck reduce flatten
 #' @importFrom magrittr %>% %<>% set_colnames
 #' @importFrom tibbleOne build_meta adapt_round
-#' @importFrom tidyselect vars_pull
 
 "_PACKAGE"
 

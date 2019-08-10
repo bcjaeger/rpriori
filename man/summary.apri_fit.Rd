@@ -4,12 +4,10 @@
 \alias{summary.apri_fit}
 \title{summarize an \code{apri_fit} object.}
 \usage{
-\method{summary}{apri_fit}(object, ...)
+\method{summary}{apri_fit}(object)
 }
 \arguments{
 \item{object}{an object of class \code{apri_fit}}
-
-\item{...}{additional arguments affecting the summary values.}
 }
 \description{
 summarize an \code{apri_fit} object.
