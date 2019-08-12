@@ -29,9 +29,9 @@ print.apriori <- function(x, ...){
 #' @export
 #' 
 
-print.apri_spec <- function(x, ...){
+print.apri_mspec <- function(x, ...){
   
-  print(spec_describe(x), ...)
+  print(mspec_describe(x), ...)
   
 }
 
@@ -51,12 +51,15 @@ sf_labels <- function(string){
       perl = TRUE
     )
   ) %>% 
-    reduce(c)
+    reduce(c) %>% 
+    str_split(fixed(','), simplify = TRUE) %>% 
+    trimws() %>% 
+    apply(1, function(x) paste(x, collapse = '/'))
   
   if(vec_is_empty(output)) {
     return(string)
+  } else {
+    output
   }
-  
-  output
   
 }

@@ -9,40 +9,36 @@
 \alias{mspec_describe}
 \title{Create, edit, and combine model specifications}
 \usage{
-mspec_new(name = "Model 0", control = "1", parent = NULL,
-  relation = NULL)
+mspec_new(name = "Model 1", ...)
 
 mspec_empty(name = "Model 0")
 
-mspec_add(mspec, name, ...)
+mspec_add(mspec, ..., name = NULL)
 
 mspec_rmv(mspec, name, ...)
 
 mspec_sub(mspec, name, ...)
 
-mspec_describe(mspec)
+mspec_describe(mspec, verbose = FALSE)
 }
 \arguments{
 \item{name}{(character value). The label that will be used
 to describe this model specification}
 
-\item{control}{A set of variable names (separated by commas) that will be
+\item{...}{A set of variable names (separated by commas) that will be
 used to adjust estimates in fitted models when this specification is
-fit. The values may be supplied as unquoted variable names or as
-a character vector.}
+applied. The values may be supplied with or without quotation marks
+around the variable names (e.g., 'x' or x).}
 
-\item{parent}{(\code{apri_mspec} object). If you are creating an empty model,
-this argument is not needed. For all descendant models, this argument
-specifies what specification the descendant is derived from.}
-
-\item{relation}{(character value). Descendant models may add, remove,
-or substitute control variables from their parent model. This argument
-sets the relationship between parent and descendant. Valid inputs are
-'add', 'rmv', or 'sub'.}
+\item{parent}{This parameters if only used for \code{mspec_add},
+\code{mspec_rmv}, and \code{mspec_sub}. The parent \code{mspec_apri} object passes
+it's control variables to the descendant, accounting for modifications
+specified in \code{...}}
 }
 \value{
 \itemize{
 \item \code{mspec_empty()} returns an unadjusted model specification.
+\item \code{mspec_new()} returns a model specification
 \item \code{mspec_add()}, \code{mspec_rmv()} returns a model specification with the
 designated control variables added or removed from the parent
 model specification.
@@ -55,7 +51,7 @@ variable names supplied by the user (right hand side of the \code{=})
 \code{mspec_empty()}, \code{mspec_add()}, \code{mspec_rmv()}, and \code{mspec_sub()} are
 functions that can be used to create model fitting specifications.
 \code{mspec_describe()} is a function that helps clarify model specifications
-and facilitates interactive work and clear communication.
+and facilitates interactive work.
 }
 \details{
 Use \code{mspec_empty()} to create a generic unadjusted specification.

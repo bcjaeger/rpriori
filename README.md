@@ -67,33 +67,7 @@ Now we can make Model 1, a descendant of the unadjusted model.
 m1  <- mspec_add(m0, name = "Model 1", sex, age)
 
 m1
-#> $name
-#> [1] "Model 1"
-#> 
-#> $control
-#> [1] "1"   "sex" "age"
-#> 
-#> $parent
-#> $name
-#> [1] "Model 0"
-#> 
-#> $control
-#> [1] "1"
-#> 
-#> $parent
-#> NULL
-#> 
-#> $relation
-#> NULL
-#> 
-#> attr(,"class")
-#> [1] "apri_mspec"
-#> 
-#> $relation
-#> [1] "add"
-#> 
-#> attr(,"class")
-#> [1] "apri_mspec"
+#> [1] "Model 1 includes adjustment for sex and age."
 
 # model 0 is automatically set as the parent since m0
 # was supplied to mspec_add.
@@ -110,13 +84,13 @@ And now we can make descendants of model 1.
 ``` r
 
 # Model 2a = model 1 + no. of siblings/spouses
-m2a <- mspec_add(m1, name = 'Model 2a', sibsp)
+m2a <- mspec_add(m1, sibsp, name = 'Model 2a')
 
 # Model 2b = model 1 + no. of parents/children
-m2b <- mspec_add(m1, name = 'Model 2b', parch)
+m2b <- mspec_add(m1, parch, name = 'Model 2b')
 
 # Model 3 = model 1, swapping out age for ticket fare
-m3 <- mspec_sub(m1, name = 'Model 3', age = fare)
+m3 <- mspec_sub(m1, age = fare, name = 'Model 3')
 ```
 
 What comes next? Our specifications are set, but they are separate. They
@@ -129,10 +103,19 @@ into an object that encapsulates our main hypothesis with `mspec_embed`
 ttnc <- drop_na(titanic) %>% 
   mutate(survived = as.numeric(survived) - 1)
 
-main_hypothesis <- survived ~ pclass
+main_hypothesis <- hypothesize_that(survived ~ pclass)
 
 apri <- main_hypothesis %>% embed_mspecs(m0, m1, m2a, m2b, m3)
 
+# Model descriptions are embedded as an attribute
+cat(paste(attr(apri, 'model_description'), collapse = '\n'))
+#> Model 0 is unadjusted.
+#> Model 1 includes adjustment for sex and age.
+#> Model 2a = Model 1 plus sibsp.
+#> Model 2b = Model 1 plus parch.
+#> Model 3 = Model 1 with fare replacing age.
+
+# Print the apriori analysis plan
 apri
 #> # A tibble: 5 x 4
 #>   name     outcome  exposure formula  
@@ -144,7 +127,14 @@ apri
 #> 5 Model 3  survived pclass   <formula>
 ```
 
-Embed data\! (fill this in)
+Now that we have organized an analysis plan, we can bring data into the
+mix. The `embed_data()` function fits into an a priori analysis workflow
+as the penultimate step. A dataset (or list of datasets if multiple
+imputation is used) is supplied as the first argument to `embed_data()`.
+Following this argument, key-value pairs can be supplied to set labels
+for variables in the analysis (see code below). For continuous
+variables, a label and unit can be specified by supplying a character
+vector, i.e., `c("label here", "units here")`.
 
 ``` r
 
@@ -152,22 +142,24 @@ apri %<>% embed_data(
   data = ttnc,
   pclass = 'Ticket class',
   sex = 'Sex',
-  age = 'Passenger age', 
+  age = c('Passenger age', 'years'), 
   sibsp = 'No. of siblings/spouses',
   parch = 'No. of parents/children',
-  fare = 'Price of ticket'
+  fare = c('Price of ticket','dollars') # (maybe pounds?)
 )
 
+# Note that embed_data transforms apri into a list
 names(apri)
 #> [1] "analysis" "var_data" "fit_data"
 
+# But it still prints like a tibble
 apri
 #> A priori model specifications for assessing survived ~ pclass: 
 #>   Model 0 is unadjusted.
 #>   Model 1 includes adjustment for sex and age.
-#>   Model 2a includes adjustment for variables in Model 1 plus sibsp.
-#>   Model 2b includes adjustment for variables in Model 1 plus parch.
-#>   Model 3 includes adjustment for variables in Model 1 with fare replacing age.
+#>   Model 2a = Model 1 plus sibsp.
+#>   Model 2b = Model 1 plus parch.
+#>   Model 3 = Model 1 with fare replacing age.
 #> 
 #>  Analysis object 
 #> # A tibble: 5 x 4
@@ -196,7 +188,6 @@ Here we will use the `glm` engine to make a set of logistic regression
 models.
 
 ``` r
-
 
 apri_heavy <- apri %>% 
   embed_fits(
@@ -258,7 +249,7 @@ apri_light <- apri %>%
 # much memory as the light version
 
 object.size(apri_heavy) / object.size(apri_light)
-#> 35.1 bytes
+#> 35 bytes
 
 # we'll use the light apri object for the
 # rest of this tutorial.
@@ -282,9 +273,9 @@ apri %>%
 #> A priori model specifications for assessing survived ~ pclass: 
 #>   Model 0 is unadjusted.
 #>   Model 1 includes adjustment for sex and age.
-#>   Model 2a includes adjustment for variables in Model 1 plus sibsp.
-#>   Model 2b includes adjustment for variables in Model 1 plus parch.
-#>   Model 3 includes adjustment for variables in Model 1 with fare replacing age.
+#>   Model 2a = Model 1 plus sibsp.
+#>   Model 2b = Model 1 plus parch.
+#>   Model 3 = Model 1 with fare replacing age.
 #> 
 #>  Analysis object 
 #> # A tibble: 5 x 8
@@ -309,9 +300,9 @@ apri %>%
 #> A priori model specifications for assessing survived ~ pclass: 
 #>   Model 0 is unadjusted.
 #>   Model 1 includes adjustment for sex and age.
-#>   Model 2a includes adjustment for variables in Model 1 plus sibsp.
-#>   Model 2b includes adjustment for variables in Model 1 plus parch.
-#>   Model 3 includes adjustment for variables in Model 1 with fare replacing age.
+#>   Model 2a = Model 1 plus sibsp.
+#>   Model 2b = Model 1 plus parch.
+#>   Model 3 = Model 1 with fare replacing age.
 #> 
 #>  Analysis object 
 #> # A tibble: 5 x 8
@@ -337,9 +328,9 @@ apri %>%
 #> A priori model specifications for assessing survived ~ pclass: 
 #>   Model 0 is unadjusted.
 #>   Model 1 includes adjustment for sex and age.
-#>   Model 2a includes adjustment for variables in Model 1 plus sibsp.
-#>   Model 2b includes adjustment for variables in Model 1 plus parch.
-#>   Model 3 includes adjustment for variables in Model 1 with fare replacing age.
+#>   Model 2a = Model 1 plus sibsp.
+#>   Model 2b = Model 1 plus parch.
+#>   Model 3 = Model 1 with fare replacing age.
 #> 
 #>  Analysis object 
 #> # A tibble: 5 x 8
@@ -357,8 +348,18 @@ function.
 
 ``` r
 
-footer <- list(m0, m1, m2a, m2b, m3) %>% 
-  map_chr(mspec_describe)
+lbl <- map(apri$fit_data, attr, 'label') %>% 
+  purrr::discard(is.null)
+
+footer <- map_chr(
+  .x = list(m0, m1, m2a, m2b, m3),
+  .f = ~{
+    .x$control <- enframe(.x$control) %>% 
+      mutate(value = tolower(recode(value, !!!lbl))) %>% 
+      pull(value)
+    mspec_describe(.x, verbose = TRUE)
+  }
+)
 
 apri %>% 
   hoist_effect(pclass, ci = 0.95, transform = exp) %>% 
@@ -400,7 +401,7 @@ the given model fits.
     age`.
 
 This approach is standard for population science papers and it can also
-creat very informative tables, but making those tables can get very
+create very informative tables, but making those tables can get very
 tedious very quickly. `rpriori` is designed to help generate and
 tabulate these tables without having to fit dozens of models by hand.
 All we need to do is apply the `summary` function to an `apri_fit` model
@@ -410,7 +411,7 @@ process outlined above:
 ``` r
 
 # Summary of unadjusted relationships between survival
-# and each of the variables used in this analysis.
+# and each of the variables used in this analysis, separately.
 summary(apri$analysis$fit[[1]])
 #> # A tibble: 9 x 8
 #>   variable term         level  ref   estimate std.error   pv_term   pv_ovrl
@@ -418,10 +419,10 @@ summary(apri$analysis$fit[[1]])
 #> 1 pclass   pclassFirst  First  TRUE   NA        0       NA        NA       
 #> 2 pclass   pclassSecond Second FALSE  -0.726    0.217    8.08e- 4  2.72e-21
 #> 3 pclass   pclassThird  Third  FALSE  -1.80     0.198    1.03e-19  2.72e-21
-#> 4 age      age          1 unit FALSE  -0.0110   0.00533  3.97e- 2  3.97e- 2
-#> 5 sibsp    sibsp        1 unit FALSE  -0.0384   0.0828   6.43e- 1  6.43e- 1
-#> 6 parch    parch        1 unit FALSE   0.220    0.0898   1.42e- 2  1.42e- 2
-#> 7 fare     fare         1 unit FALSE   0.0160   0.00250  1.61e-10  1.61e-10
+#> 4 age      age          years  FALSE  -0.0110   0.00533  3.97e- 2  3.97e- 2
+#> 5 sibsp    sibsp        <NA>   FALSE  -0.0384   0.0828   6.43e- 1  6.43e- 1
+#> 6 parch    parch        <NA>   FALSE   0.220    0.0898   1.42e- 2  1.42e- 2
+#> 7 fare     fare         dolla~ FALSE   0.0160   0.00250  1.61e-10  1.61e-10
 #> 8 sex      sexMale      Male   TRUE    0        0       NA        NA       
 #> 9 sex      sexFemale    Female FALSE   2.48     0.185    6.70e-41  6.70e-41
 ```
@@ -464,10 +465,10 @@ apri_tbl
 #> 1 Ticket cl~ First  1 (referen~ 1 (refere~ 1 (refere~ 1 (refere~ 1 (refere~
 #> 2 Ticket cl~ Second 0.48 (0.32~ 0.27 (0.1~ 0.24 (0.1~ 0.27 (0.1~ 0.45 (0.2~
 #> 3 Ticket cl~ Third  0.17 (0.11~ 0.08 (0.0~ 0.07 (0.0~ 0.08 (0.0~ 0.16 (0.0~
-#> 4 Passenger~ 1 unit 0.99 (0.98~ 0.99 (0.9~ 0.99 (0.9~ 0.99 (0.9~ 0.99 (0.9~
-#> 5 No. of si~ 1 unit 0.96 (0.82~ 0.74 (0.6~ 0.74 (0.6~ 0.76 (0.6~ 0.69 (0.5~
-#> 6 No. of pa~ 1 unit 1.25 (1.05~ 0.86 (0.6~ 0.94 (0.7~ 0.86 (0.6~ 0.75 (0.6~
-#> 7 Price of ~ 1 unit 1.02 (1.01~ 1.01 (1.0~ 1.02 (1.0~ 1.02 (1.0~ 1.01 (1.0~
+#> 4 Passenger~ years  0.99 (0.98~ 0.99 (0.9~ 0.99 (0.9~ 0.99 (0.9~ 0.99 (0.9~
+#> 5 No. of si~ <NA>   0.96 (0.82~ 0.74 (0.6~ 0.74 (0.6~ 0.76 (0.6~ 0.69 (0.5~
+#> 6 No. of pa~ <NA>   1.25 (1.05~ 0.86 (0.6~ 0.94 (0.7~ 0.86 (0.6~ 0.75 (0.6~
+#> 7 Price of ~ dolla~ 1.02 (1.01~ 1.01 (1.0~ 1.02 (1.0~ 1.02 (1.0~ 1.01 (1.0~
 #> 8 Sex        Male   1 (referen~ 1 (refere~ 1 (refere~ 1 (refere~ 1 (refere~
 #> 9 Sex        Female 11.9 (8.29~ 11.8 (8.1~ 12.8 (8.7~ 12.7 (8.6~ 10.8 (7.4~
 ```

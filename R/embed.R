@@ -1,22 +1,20 @@
 
-
-#' embed a set of model specifications into a primary hypothesis.
-#' @param formula a two-sided formula containing outcome(s) on the
-#'   left and exposure(s) on the right. (Control variables do not
-#'   belong here.)
-#' @param ... Model specification objects created using \link{mspec_new}, 
-#'  \link{mspec_add}, \link{mspec_sub}, etc. (Control variables do belong
-#'  here).
+#' initialize an a priori analysis with a hypothesis.
+#' 
+#' @param formula a two-sided formula. Outcomes go on the
+#'   left hand side of the formula, and exposures on the right.
+#'
+#' @note Control variables do not belong here. Instead, they 
+#'   are specified in the \code{\link{mspec_new}}, 
+#'   \code{\link{mspec_add}}, \code{\link{mspec_rmv}}, and
+#'   \code{\link{mspec_sub}} functions.
+#'   
 #' @export
 
-embed_mspecs <- function(formula, ...) {
-  
-  control <- list(...)
-  
-  model_names <- map_chr(control, ~.x$name)
+hypothesize_that <- function(formula){
   
   if (is.one.sided(formula)) {
-    msg <- "formula must have a response, i.e. response ~ exposure"
+    msg <- "formula must have an outcome, i.e. outcome ~ exposure"
     stop(msg, call. = FALSE)
   }
   
@@ -36,13 +34,33 @@ embed_mspecs <- function(formula, ...) {
     
   }
   
-  formula_data <- expand.grid(
+  output <- expand.grid(
     outcome = formula_lhs,
     exposure = rhs.vars(formula)
   ) %>% 
-    mutate(formula = paste(outcome, exposure, sep = ' ~ '))
+    mutate(formula = paste(outcome, exposure, sep = ' ~ ')) %>% 
+    as_tibble()
   
-  formulas <- formula_data %>% 
+  attr(output, 'main_hypothesis') = formula
+  
+  output
+  
+}
+
+
+#' embed a set of model specifications into a primary hypothesis.
+#' @param ... Model specification objects created using \link{mspec_new}, 
+#'  \link{mspec_add}, \link{mspec_sub}, etc. (Control variables do belong
+#'  here).
+#' @export
+
+embed_mspecs <- function(hypothesis, ..., verbose = FALSE) {
+  
+  control <- list(...)
+  
+  model_names <- map_chr(control, ~.x$name)
+  
+  formulas <- hypothesis %>% 
     pull(formula) %>% 
     map(as.formula) %>% 
     map(
@@ -63,8 +81,13 @@ embed_mspecs <- function(formula, ...) {
     ) %>% 
     select(name, outcome, exposure, formula)
   
-  attr(output, 'main_hypothesis') = formula
-  attr(output, 'model_description') = map_chr(control, mspec_describe)
+  attr(output, 'main_hypothesis') = attr(hypothesis, 'main_hypothesis')
+  
+  attr(output, 'model_description') = map_chr(
+    .x = control, 
+    .f = mspec_describe,
+    verbose = verbose
+  )
   
   output
   
@@ -83,9 +106,20 @@ embed_data <- function(mspecs, data, ...) {
   
   .dots <- list(...)
   
+  using_mi <- class(data)[1] %in% c('list', 'mild') 
+  
+  if(using_mi){
+    data %<>% bind_rows(.id = 'imputation_id')
+  }
+  
   if(!vec_is_empty(names(.dots))){
     for(i in names(.dots)){
-      attr(data[[i]], 'label') <- .dots[[i]]
+      attr(data[[i]], 'label') <- .dots[[i]][1L]
+      
+      if(vec_size(.dots[[i]]) > 1L){
+        attr(data[[i]], 'unit') <- .dots[[i]][2L]
+      }
+      
     }
   }
   
@@ -98,12 +132,14 @@ embed_data <- function(mspecs, data, ...) {
     analysis = mspecs,
     var_data = var_data,
     fit_data = data
-  )
+  ) %>% 
+    map(.f = as_tibble)
   
   class(output) <- "apriori"
   
   attr(output, 'main_hypothesis') = attr(mspecs, 'main_hypothesis')
   attr(output, 'model_description') = attr(mspecs, 'model_description')
+  attr(output, 'multiple_imputation') = using_mi
   
   output
   
@@ -191,7 +227,7 @@ create_var_data <- function(formulas, data){
     
     nmrc_variables %<>% 
       purrr::set_names() %>% 
-      map(~ attr(data[[.x]], 'unit') %||% "1 unit" ) %>% 
+      map(~ attr(data[[.x]], 'unit') %||% NA_character_ ) %>% 
       enframe('variable', 'level') %>% 
       unnest() %>% 
       filter(!variable %in% outcome_variables) %>% 
@@ -264,18 +300,27 @@ embed_fits <- function(
   ...
 ){
   
-  .dots <- list(...)
+  engine_args <- list(...)
+  
+  if(!engine %in% c('lm', 'glm', 'gee', 'cph')){
+    stop(
+      glue(
+        "{engine} engine is unrecognized. Use lm, glm, gee, or cph"
+      ),
+      call. = FALSE
+    )
+  }
   
   if(engine %in% c('glm','gee')) {
     
-    family_specified <- 'family' %in% names(.dots)
+    family_specified <- 'family' %in% names(engine_args)
     
     if(!family_specified){
       msg <- "family must be specified for glm and geeglm objects"
       stop(msg, call. = FALSE)
     }
     
-    family <- .dots$family
+    family <- engine_args$family
     
     if (is.character(family)) {
       family <- get(family, mode = "function", envir = parent.frame())
@@ -305,7 +350,7 @@ embed_fits <- function(
           
           stop(
             glue("geeglm expects numeric outcome variables for \\
-            {family$family} models. Change {outcome} to numeric."),
+            {family$family} models. Change {outcomes} to numeric."),
             call. = FALSE
           )
           
@@ -316,39 +361,22 @@ embed_fits <- function(
     }
     
   }
-    
-  fit_fun <- if (is_character(engine)) {
-    switch(
-      engine,
-      'lm'  = lm_apri,
-      'glm' = glm_apri,
-      'gee' = glm_apri,
-      'cph' = cph_apri,
-      stop(
-        glue(
-          "{engine} engine is unrecognized. Use lm, glm, gee, or cph"
-        ),
-        call. = FALSE
-      )
-    )
-  }
   
   output <- map(
     .x = object$analysis$formula,
     .f = fit_fun,
-    engine = engine,
     data = object$fit_data,
     mvars = object$var_data,
+    engine = engine,
+    engine_args = engine_args,
     fill_models = fill_models,
     keep_models = keep_models,
-    ...
+    use_mi = attr(object, 'multiple_imputation')
   ) %>% 
-    map(
-      .f = function(mdl){
-          class(mdl) <- "apri_fit"  
-          mdl
-        }
-      )
+    map(.f = function(mdl){
+      class(mdl) <- "apri_fit"  
+      mdl
+    })
   
   object$analysis$fit = output
   
@@ -368,16 +396,165 @@ embed_fits <- function(
 
 # .dots <- list(family = family, data = data)
 
+fit_fun <- function(
+  formula,
+  data,
+  mvars,
+  use_mi,
+  engine,
+  engine_args = list(),
+  fill_models,
+  keep_models
+) {
+  
+  exposure = attr(formula, 'exposure')
+  
+  fitter <- switch(
+    engine,
+    'lm' = lm,
+    'glm' = glm,
+    'cph' = coxph,
+    'gee' = gee_no_ID
+  )
+  
+  fitter_args = engine_args
+  fitter_args$formula = formula
+  
+  if(use_mi){
+    
+    model <- data %>% 
+      split(.$imputation_id) %>% 
+      map(
+        .f = function(df){
+          fitter_args$data = df
+          do.call(fitter, args = fitter_args)
+        }  
+      )
+    
+    pooled_model <- testEstimates(model = model)
+    
+    beta_df <- pooled_model$estimates %>% 
+      as_tibble(rownames = 'term') %>% 
+      select(term, estimate = Estimate)
+    
+    betas <- pull(beta_df, estimate)
+    
+    covb_df <- pooled_model$estimates %>% 
+      as_tibble(rownames = 'term') %>% 
+      select(term, std.error = Std.Error)
+    
+    covbs <- map(model, vcov) %>% 
+      reduce(`+`) %>% 
+      divide_by(length(model))
+    
+  } else {
+    
+    fitter_args$data = data
+    model <- do.call(fitter, args = fitter_args)
+    
+    betas <- coef(model)
+    covbs <- vcov(model)
+    
+    beta_df <- enframe(
+      x = betas, 
+      name = 'term', 
+      value = 'estimate'
+    )
+    
+    covb_df <- enframe(
+      x = sqrt(diag(covbs)), 
+      name = 'term',
+      value = 'std.error'
+    )
+    
+  }
+  
+  terms <- mvars %>%
+    filter(variable == exposure, !ref) %>%
+    pull(term)
+  
+  main_estm <- mvars %>% 
+    filter(variable == exposure) %>% 
+    select(variable, term, level, ref) %>% 
+    left_join(beta_df, by = 'term') %>% 
+    left_join(covb_df, by = 'term') %>% 
+    mutate(pv_term = NA_real_, pv_ovrl = NA_real_)
+  
+  main_estm$pv_term[!main_estm$ref] <- if(use_mi){
+    get_term_pval_mi(model = model, variable = terms)
+  } else {
+    get_term_pval(model = model, variable = terms)
+  }
+    
+  # Overall p-value
+  if(vec_size(terms) > 1L){
+    
+    if(use_mi){
+      main_estm %<>% 
+        mutate(
+          pv_ovrl = get_ovrl_pval_mi(
+            model = model, 
+            variable = exposure,
+            data = data, 
+            fitter = fitter, 
+            fitter_args = fitter_args
+          )
+        )
+    } else {
+      main_estm %<>% 
+        mutate(
+          pv_ovrl = get_ovrl_pval(
+            model = model, 
+            variable = exposure
+          )
+        )
+    }
+    
+    
+    
+  }
+  
+  if (fill_models) {
+    supp_estm <-
+      fill_estimates(
+        model = model,
+        data = data,
+        use_mi = use_mi,
+        exposure = exposure,
+        control = rhs.vars(formula),
+        fitter = fitter,
+        fitter_args = fitter_args,
+        mvars = mvars
+      )
+  }
+  
+  apri_model <- list(
+    mcall = formula,
+    model = NULL,
+    betas = betas,
+    covbs = covbs,
+    estms = bind_rows(main_estm, supp_estm)
+  )
+  
+  if(keep_models){
+    apri_model$model = model
+    apri_model$model$call = formula
+  } 
+  
+  apri_model
+  
+}
+
 fill_estimates <- function(
   model, 
+  data,
+  use_mi,
   exposure, 
-  control,
-  fitter,  
-  mvars, 
-  ...
+  control,  
+  mvars,
+  fitter,
+  fitter_args = list()
 ){
-  
-  .dots <- list(...)
   
   variables = unique(mvars$variable)
   
@@ -392,7 +569,11 @@ fill_estimates <- function(
     ) %>% 
     filter(variable != exposure)
   
-  .frmla <- as.character(model$formula)
+  .frmla <- if(use_mi) {
+    as.character(model[[1]]$formula)
+  } else {
+    as.character(model$formula)
+  }
   
   for(v in variables_to_add){
     
@@ -401,33 +582,98 @@ fill_estimates <- function(
     # If v is a control variable, it's already in the model,
     # so we just need to remove the exposure variable. Otherwise,
     # we need to remove the exposure variable and also include v.
-    if(v_is_control_variable){
+    if(v_is_control_variable) {
+      
       frmla_string <- "{.frmla} - {exposure}"
+      
     } else {
+      
       frmla_string <- "{.frmla} + {v} - {exposure}"
+      
     }
     
-    .dots$formula <- as.formula(glue(frmla_string))
+    fitter_args$formula <- as.formula(glue(frmla_string))
     
     # Fit a new model that does not contain the exposure variable
     # (why?) to get the estimated effect of this variable (v) in
     # the same model that we estimated the effect of the main
     # exposure variable in.
-    .model <- do.call(fitter, args=.dots)
+    
+    if(use_mi){
+      
+      .model <- map(
+        .x = split(data, data$imputation_id), 
+        .f = function(df){
+          .args = fitter_args
+          .args$data = df
+          do.call(fitter, args = .args)
+        }
+      )
+      
+    } else {
+      
+      fitter_args$data <- data
+      .model <- do.call(fitter, args=fitter_args)
+      
+    }
     
     vv <- output %>% 
       filter(variable == v, !ref) %>% 
       pull(term)
     
-    pv_ovrl <- pv_term <- get_term_pval(model = .model, variable = vv)
+    pv_ovrl <- pv_term <- if(use_mi){
+      get_term_pval_mi(model = .model, variable = vv)
+    } else {
+      get_term_pval(model = .model, variable = vv)
+    }
+      
     
     # Overall p-value
     if(vec_size(vv) > 1L){
-      pv_ovrl <- get_ovrl_pval(model = .model, variable = v)
-    } 
+      
+      if(use_mi){
+        
+        pv_ovrl <- get_ovrl_pval_mi(
+          model = .model, 
+          variable = v, 
+          data = data, 
+          fitter = fitter, 
+          fitter_args = .dots
+        )
+        
+      } else {
+        
+        pv_ovrl <- get_ovrl_pval(model = .model, variable = v)
 
-    output$estimate[output$term %in% vv] <- coef(.model)[vv]
-    output$std.error[output$term %in% vv] <- sqrt(diag(vcov(.model)))[vv]
+      }
+      
+      
+    } 
+    
+    betas <- if(use_mi){
+      testEstimates(.model) %>% 
+        use_series('estimates') %>% 
+        as_tibble(rownames = 'term') %>% 
+        select(term, estimate = Estimate) %>% 
+        filter(term %in% vv) %>% 
+        deframe()
+    } else {
+      coef(.model)[vv]
+    }
+    
+    covbs <- if(use_mi){
+      testEstimates(.model) %>% 
+        use_series('estimates') %>% 
+        as_tibble(rownames = 'term') %>% 
+        select(term, std.error = Std.Error) %>% 
+        filter(term %in% vv) %>% 
+        deframe()
+    } else {
+      sqrt(diag(vcov(.model)))[vv]
+    }
+
+    output$estimate[output$term %in% vv] <- betas
+    output$std.error[output$term %in% vv] <- covbs
     output$pv_term[output$term %in% vv] <- pv_term
     output$pv_ovrl[output$term %in% vv] <- pv_ovrl
     
@@ -437,130 +683,23 @@ fill_estimates <- function(
   
 }
 
-glm_apri <- function(
-  formula,
-  data,
-  mvars,
-  engine,
-  fill_models,
-  keep_models,
-  ...
-) {
-  
-  exposure = attr(formula, 'exposure')
-  
-  if(engine == 'gee'){
-    
-    model <- gee_no_ID(
-      formula = formula,
-      data = data, 
-      ...
-    )
-    
-  } else if(engine == 'glm'){
-    
-    model <- glm(
-      formula = formula, 
-      data = data,
-      ...
-    )
-    
-  } else if(engine == 'lm'){
-    
-    model <- lm(
-      formula = formula, 
-      data = data,
-      ...
-    )
-    
-  } else if(engine == 'cph'){
-    
-    model <- coxph(
-      formula = formula, 
-      data = data, 
-      ...
-    )
-    
-  }
-  
-  terms <- mvars %>%
-    filter(variable == exposure, !ref) %>%
-    pull(term)
-  
-  beta_df <- enframe(
-    x = coef(model), 
-    name = 'term', 
-    value = 'estimate'
-  )
-  
-  covb_df <- enframe(
-    x = sqrt(diag(vcov(model))), 
-    name = 'term',
-    value = 'std.error'
-  )
-  
-  main_estm <- mvars %>% 
-    filter(variable == exposure) %>% 
-    select(variable, term, level, ref) %>% 
-    left_join(beta_df, by = 'term') %>% 
-    left_join(covb_df, by = 'term') %>% 
-    mutate(pv_term = NA_real_, pv_ovrl = NA_real_)
-  
-  main_estm$pv_term[!main_estm$ref] <- get_term_pval(
-    model = model, 
-    variable = terms
-  )
-  
-  # Overall p-value
-  if(vec_size(terms) > 1L){
-    
-    main_estm %<>% mutate(
-      pv_ovrl = get_ovrl_pval(model = model, variable = exposure)
-    )
-    
-  }
-  
-  if (fill_models) {
-    supp_estm <-
-      fill_estimates(
-        model = model,
-        exposure = exposure,
-        control = rhs.vars(formula),
-        fitter = switch(engine, 'glm' = glm, 'gee' = gee_no_ID),
-        mvars = mvars,
-        family = model$family$family,
-        data = data
-      )
-  }
-  
-  apri_model <- list(
-    mcall = formula,
-    model = NULL,
-    betas = coef(model),
-    covbs = vcov(model),
-    estms = bind_rows(main_estm, supp_estm)
-  )
-  
-  if(keep_models){
-    apri_model$model = model
-    apri_model$model$call = formula
-  } 
-  
-  apri_model
-  
-}
+
+#' estimate the variance-covariance matrix of regression coefficients
+#'   from a generalized linear model fitted with generalized estimating
+#'   equations. 
+#' @param object an object of class `geeglm`.
+#' @param ... additional arguments passed along to other functions. 
+#' @export
 
 vcov.geeglm <- function(object, ...) {
   
   sobj <- summary(object)
   covb <- sobj$cov.scaled
   
-  covb_names <- names(coef(object))
-  colnames(covb) <- covb_names
-  rownames(covb) <- covb_names
+  nms <- names(coef(object))
+  colnames(covb) <- rownames(covb) <- nms
   
   covb
   
 }
 
-  

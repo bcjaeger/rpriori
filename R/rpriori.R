@@ -8,6 +8,7 @@
 #' @import dplyr
 #' @import tibble
 #' @importFrom forcats fct_inorder
+#' @importFrom mitml testEstimates
 #' @importFrom rlang %||% is_character ensyms
 #' @importFrom vctrs vec_size vec_is_empty
 #' @importFrom tidyr unnest spread

@@ -7,7 +7,7 @@
 #' `mspec_empty()`, `mspec_add()`, `mspec_rmv()`, and `mspec_sub()` are 
 #'   functions that can be used to create model fitting specifications. 
 #'   `mspec_describe()` is a function that helps clarify model specifications
-#'   and facilitates interactive work and clear communication.
+#'   and facilitates interactive work.
 #'
 #' @details
 #'
@@ -19,22 +19,20 @@
 #'
 #' @family model specification functions
 #'
+#' @param parent This parameters if only used for `mspec_add`,
+#'   `mspec_rmv`, and `mspec_sub`. The parent `mspec_apri` object passes
+#'   it's control variables to the descendant, accounting for modifications
+#'   specified in `...`
 #' @param name (character value). The label that will be used 
 #'   to describe this model specification
-#' @param control A set of variable names (separated by commas) that will be
+#' @param ... A set of variable names (separated by commas) that will be
 #'   used to adjust estimates in fitted models when this specification is
-#'   fit. The values may be supplied as unquoted variable names or as 
-#'   a character vector.
-#' @param parent (`apri_mspec` object). If you are creating an empty model,
-#'   this argument is not needed. For all descendant models, this argument
-#'   specifies what specification the descendant is derived from.
-#' @param relation (character value). Descendant models may add, remove, 
-#'   or substitute control variables from their parent model. This argument
-#'   sets the relationship between parent and descendant. Valid inputs are
-#'   'add', 'rmv', or 'sub'. 
+#'   applied. The values may be supplied with or without quotation marks
+#'   around the variable names (e.g., 'x' or x).
 #'   
 #' @return
 #'  - `mspec_empty()` returns an unadjusted model specification.
+#'  - `mspec_new()` returns a model specification 
 #'  - `mspec_add()`, `mspec_rmv()` returns a model specification with the 
 #'      designated control variables added or removed from the parent 
 #'      model specification.
@@ -76,18 +74,21 @@
 #' @export
 
 mspec_new <- function(
-  name = "Model 0",
-  control = "1",
-  parent = NULL,
-  relation = NULL
+  name = "Model 1",
+  ...
 ){
+  
+  control <- enquos(...) %>%
+    map_chr(deparse) %>% 
+    gsub("~", "", x = ., fixed=TRUE) %>% 
+    append(value = "1", after = 0)
   
   structure(
     .Data = list(
       name = name,
       control = control,
-      parent = parent,
-      relation = relation
+      parent = NULL,
+      relation = 'origin'
     ),
     class = 'apri_mspec'
   )
@@ -98,7 +99,7 @@ mspec_new <- function(
 #' @export
 mspec_empty <- function(name = 'Model 0'){
   
-  mspec_new(
+  mspec_work(
     name = name
   )
   
@@ -106,11 +107,20 @@ mspec_empty <- function(name = 'Model 0'){
 
 #' @rdname mspec_new
 #' @export
-mspec_add <- function(mspec, name, ...){
+mspec_add <- function(mspec, ..., name = NULL){
   
-  vars_to_add <- map_chr(ensyms(...), deparse)
+  vars_to_add <- map_chr(ensyms(...), deparse) 
   
-  mspec_new(
+  mistaken_vars <- intersect(vars_to_add, mspec$control)
+  
+  if(vec_size(mistaken_vars) > 0){
+    vars_to_print <- glue_collapse(mistaken_vars, sep = ', ', last = ' and ')
+    is_or_are <- if(vec_size(mistaken_vars)==1) "is" else "are"
+    msg <- glue("{vars_to_print} {is_or_are} already in {mspec$name}")
+    stop(msg, call.=FALSE)
+  }
+  
+  mspec_work(
     name = name,
     control = union(mspec$control, vars_to_add),
     parent = mspec,
@@ -125,7 +135,16 @@ mspec_rmv <- function(mspec, name, ...){
   
   vars_to_rmv <- map_chr(ensyms(...), deparse)
   
-  mspec_new(
+  mistaken_vars <- setdiff(vars_to_rmv, mspec$control)
+  
+  if(vec_size(mistaken_vars) > 0){
+    vars_to_print <- glue_collapse(mistaken_vars, sep = ', ', last = ' and ')
+    is_or_are <- if(vec_size(mistaken_vars)==1) "is" else "are"
+    msg <- glue("{vars_to_print} {is_or_are} not in {mspec$name}")
+    stop(msg, call.=FALSE)
+  }
+  
+  mspec_work(
     name = name,
     control = setdiff(mspec$control, vars_to_rmv),
     parent = mspec,
@@ -140,7 +159,7 @@ mspec_sub <- function(mspec,  name, ...){
   
   .dots <- map_chr(enexprs(...), deparse)
   
-  mspec_new(
+  mspec_work(
     name = name,
     control = recode(mspec$control, !!!.dots),
     parent = mspec,
@@ -151,10 +170,18 @@ mspec_sub <- function(mspec,  name, ...){
 
 #' @rdname mspec_new
 #' @export
-mspec_describe <- function(mspec){
+mspec_describe <- function(mspec, verbose = FALSE){
   
   if(all(mspec$control == "1")){
     out <- paste(mspec$name, "is unadjusted.")
+    return(as.character(out))
+  }
+  
+  if(mspec$relation == 'origin'){
+    ctrl_vars <- mspec$control %>% 
+      setdiff("1") %>% 
+      glue_collapse(sep = ', ', last = ' and ')
+    out <- glue("{mspec$name} includes adjustment for {ctrl_vars}")
     return(as.character(out))
   }
   
@@ -184,9 +211,14 @@ mspec_describe <- function(mspec){
     return(as.character(out))
   }
   
+  connector <- if (verbose) {
+    "includes adjustment for variables in"
+  } else {
+    "="
+  }
+  
   string1 <- glue(
-    "{mspec$name} includes adjustment for \\
-    variables in {mspec$parent$name}"
+    "{mspec$name} {connector} {mspec$parent$name}"
   )
   
   string2 <- switch(
@@ -227,13 +259,27 @@ mspec_push <- function(mspec, formula){
   
 }
 
-#' combine all pairs of outcome ~ exposure with
-#'   all model specifications in a given set.
-#' @param formula two-sided formula with outcome(s) 
-#'   on the left hand side and exposure(s) on the
-#'   right hand side.
-#' @param ... model specification objects.
-#' @export
+
+mspec_work <- function(
+  name = NULL,
+  control = "1",
+  parent = NULL,
+  relation = NULL
+){
+  
+  structure(
+    .Data = list(
+      name = name,
+      control = control,
+      parent = parent,
+      relation = relation
+    ),
+    class = 'apri_mspec'
+  )
+  
+}
+
+
 
 
 

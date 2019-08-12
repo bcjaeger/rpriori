@@ -6,8 +6,6 @@ output: github_document
 
 ```{r, include = FALSE}
 
-rm(list=ls())
-
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
@@ -85,13 +83,13 @@ And now we can make descendants of model 1.
 ```{r}
 
 # Model 2a = model 1 + no. of siblings/spouses
-m2a <- mspec_add(m1, name = 'Model 2a', sibsp)
+m2a <- mspec_add(m1, sibsp, name = 'Model 2a')
 
 # Model 2b = model 1 + no. of parents/children
-m2b <- mspec_add(m1, name = 'Model 2b', parch)
+m2b <- mspec_add(m1, parch, name = 'Model 2b')
 
 # Model 3 = model 1, swapping out age for ticket fare
-m3 <- mspec_sub(m1, name = 'Model 3', age = fare)
+m3 <- mspec_sub(m1, age = fare, name = 'Model 3')
 
 ```
 
@@ -102,15 +100,19 @@ What comes next? Our specifications are set, but they are separate. They also ha
 ttnc <- drop_na(titanic) %>% 
   mutate(survived = as.numeric(survived) - 1)
 
-main_hypothesis <- survived ~ pclass
+main_hypothesis <- hypothesize_that(survived ~ pclass)
 
 apri <- main_hypothesis %>% embed_mspecs(m0, m1, m2a, m2b, m3)
 
+# Model descriptions are embedded as an attribute
+cat(paste(attr(apri, 'model_description'), collapse = '\n'))
+
+# Print the apriori analysis plan
 apri
 
 ```
 
-Embed data! (fill this in)
+Now that we have organized an analysis plan, we can bring data into the mix. The `embed_data()` function fits into an a priori analysis workflow as the penultimate step. A dataset (or list of datasets if multiple imputation is used) is supplied as the first argument to `embed_data()`. Following this argument, key-value pairs can be supplied to set labels for variables in the analysis (see code below). For continuous variables, a label and unit can be specified by supplying a character vector, i.e., `c("label here", "units here")`.
 
 ```{r}
 
@@ -118,14 +120,16 @@ apri %<>% embed_data(
   data = ttnc,
   pclass = 'Ticket class',
   sex = 'Sex',
-  age = 'Passenger age', 
+  age = c('Passenger age', 'years'), 
   sibsp = 'No. of siblings/spouses',
   parch = 'No. of parents/children',
-  fare = 'Price of ticket'
+  fare = c('Price of ticket','dollars') # (maybe pounds?)
 )
 
+# Note that embed_data transforms apri into a list
 names(apri)
 
+# But it still prints like a tibble
 apri
 
 ```
@@ -136,13 +140,11 @@ The next step is to fit models defined by the specifications in `analysis`. Here
 1. linear and generalized linear models (`engine = 'lm'` and `engine = 'glm'`, respectively), 
 
 2. generalized linear models fit with generalized estimating equations (`engine = 'gee'`), and 
-
 3. Cox proportional hazards models (`engine = 'cph'`). 
 
 Here we will use the `glm` engine to make a set of logistic regression models.
 
 ```{r}
-
 
 apri_heavy <- apri %>% 
   embed_fits(
@@ -217,15 +219,24 @@ Now we have odds-ratios instead of regression coefficients. According to the apr
 apri %>% 
   hoist_effect(effect = pclass, ci = 0.95, transform = exp)
 
-
 ```
 
 This type of output can be passed right into your favorite table function.
 
 ```{r, eval = FALSE}
 
-footer <- list(m0, m1, m2a, m2b, m3) %>% 
-  map_chr(mspec_describe)
+lbl <- map(apri$fit_data, attr, 'label') %>% 
+  purrr::discard(is.null)
+
+footer <- map_chr(
+  .x = list(m0, m1, m2a, m2b, m3),
+  .f = ~{
+    .x$control <- enframe(.x$control) %>% 
+      mutate(value = tolower(recode(value, !!!lbl))) %>% 
+      pull(value)
+    mspec_describe(.x, verbose = TRUE)
+  }
+)
 
 apri %>% 
   hoist_effect(pclass, ci = 0.95, transform = exp) %>% 
@@ -260,12 +271,12 @@ Many a-priori analyses aim to present a tabular summary of **all** the variables
 
 - In order to obtain a regression coefficient for `sibsp` in **all** of the models for this analysis, we need to re-fit Model 0 (the unadjusted model) as `survived ~ sibsp` instead of `survived ~ pclass`, but that's not all! We also need to re-fit Model 1 as `survived ~ sibsp + sex + age` instead of `survived ~ pclass + sex + age`. 
 
-This approach is standard for population science papers and it can also creat very informative tables, but making those tables can get very tedious very quickly. `rpriori` is designed to help generate and tabulate these tables without having to fit dozens of models by hand. All we need to do is apply the `summary` function to an `apri_fit` model to get regression coefficients estimated by the recursive substitution process outlined above:
+This approach is standard for population science papers and it can also create very informative tables, but making those tables can get very tedious very quickly. `rpriori` is designed to help generate and tabulate these tables without having to fit dozens of models by hand. All we need to do is apply the `summary` function to an `apri_fit` model to get regression coefficients estimated by the recursive substitution process outlined above:
 
 ```{r}
 
 # Summary of unadjusted relationships between survival
-# and each of the variables used in this analysis.
+# and each of the variables used in this analysis, separately.
 summary(apri$analysis$fit[[1]])
 
 ```

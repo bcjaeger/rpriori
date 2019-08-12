@@ -4,13 +4,9 @@
 \alias{embed_mspecs}
 \title{embed a set of model specifications into a primary hypothesis.}
 \usage{
-embed_mspecs(formula, ...)
+embed_mspecs(hypothesis, ..., verbose = FALSE)
 }
 \arguments{
-\item{formula}{a two-sided formula containing outcome(s) on the
-left and exposure(s) on the right. (Control variables do not
-belong here.)}
-
 \item{...}{Model specification objects created using \link{mspec_new},
 \link{mspec_add}, \link{mspec_sub}, etc. (Control variables do belong
 here).}
